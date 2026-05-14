@@ -1,0 +1,45 @@
+services:
+  # Tailscale sidecar: joins the tailnet and shares its network namespace with LiteLLM.
+  # This lets LiteLLM reach the GPU node via Tailscale MagicDNS (e.g. http://kimi-gpu:8000).
+  ts-litellm:
+    image: tailscale/tailscale:latest
+    container_name: ts-litellm
+    hostname: ${LITELLM_HOSTNAME:-litellm-laptop}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_HOSTNAME=${LITELLM_HOSTNAME:-litellm-laptop}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=--accept-routes
+    ports:
+      - "127.0.0.1:4000:4000"  # LiteLLM exposed only on laptop's localhost
+    volumes:
+      - ts-litellm-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    network_mode: service:ts-litellm  # share tailnet with sidecar
+    depends_on:
+      ts-litellm:
+        condition: service_started
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command:
+      - --config
+      - /app/config.yaml
+      - --port
+      - "4000"
+      - --host
+      - "0.0.0.0"
+    restart: unless-stopped
+
+volumes:
+  ts-litellm-state:

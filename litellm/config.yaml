@@ -1,0 +1,42 @@
+# LiteLLM model routes.
+# All aliases point at the same vLLM-served model on the GPU node by default.
+# Switch models by changing MODEL on the GPU container — no edits here needed unless
+# you want different aliases routing to different backends (multi-model setup).
+
+model_list:
+  # Primary alias used by Cline (Act mode / default)
+  - model_name: heavy
+    litellm_params:
+      model: openai/inference   # the `openai/` prefix tells LiteLLM to use OpenAI-compatible client
+      api_base: http://zdr-coder-gpu:8000/v1   # Tailscale MagicDNS hostname
+      api_key: not-used-but-required
+
+  # Reserved for Plan mode (currently same backend)
+  - model_name: plan
+    litellm_params:
+      model: openai/inference
+      api_base: http://zdr-coder-gpu:8000/v1
+      api_key: not-used-but-required
+
+  # Convenience aliases
+  - model_name: v4-flash
+    litellm_params:
+      model: openai/inference
+      api_base: http://zdr-coder-gpu:8000/v1
+      api_key: not-used-but-required
+
+  - model_name: kimi
+    litellm_params:
+      model: openai/inference
+      api_base: http://zdr-coder-gpu:8000/v1
+      api_key: not-used-but-required
+
+# ZDR hygiene: don't log prompts/responses; metadata-only spend logs disabled.
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  turn_off_message_logging: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  disable_spend_logs: true
