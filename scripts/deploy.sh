@@ -34,9 +34,11 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    # RTX 4090 24GB is the cheapest broadly-stocked 24GB option (~$0.34/hr).
-    # Other workable swaps if 4090 also out: NVIDIA L4 (24GB, $0.44), NVIDIA A40 (48GB, $0.35).
-    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA GeForce RTX 4090}"
+    # A40 48GB is consistently the most-stocked sub-$0.50/hr Secure GPU (~$0.44/hr).
+    # 48GB easily fits Qwen3-Coder-32B at INT4 + long-context KV cache.
+    # Cheaper-but-flakier swaps if you want: RTX A5000/A6000 (~$0.27–0.49 Low stock),
+    # RTX 4090 ($0.69 Low). Check live stock with the GraphQL gpuTypes query.
+    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A40}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
     MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct}"
