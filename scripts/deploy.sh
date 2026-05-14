@@ -34,7 +34,9 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA RTX A5000}"
+    # RTX 4090 24GB is the cheapest broadly-stocked 24GB option (~$0.34/hr).
+    # Other workable swaps if 4090 also out: NVIDIA L4 (24GB, $0.44), NVIDIA A40 (48GB, $0.35).
+    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA GeForce RTX 4090}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
     MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct}"
