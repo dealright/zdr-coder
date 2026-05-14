@@ -148,7 +148,7 @@ if [ -z "$POD_ID" ]; then
     --arg tp "$TP_SIZE" \
     --arg maxLen "$MAX_LEN" \
     '{ input: {
-      name: $name, imageName: $image, cloudType: "SECURE",
+      name: $name, imageName: $image, cloudType: "ALL",
       gpuTypeId: $gpuType, gpuCount: $gpuCount,
       containerDiskInGb: $disk, volumeInGb: 0,
       ports: $ports,

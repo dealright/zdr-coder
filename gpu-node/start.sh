@@ -13,6 +13,7 @@ TP_SIZE="${TP_SIZE:-2}"
 MAX_LEN="${MAX_LEN:-262144}"
 GPU_UTIL="${GPU_UTIL:-0.92}"
 WG_LISTEN_PORT="${WG_LISTEN_PORT:-51820}"
+WG_SUBNET="${WG_SUBNET:-10.99.0}"
 
 # Model source: HF-Mirror by default (no token required for public models).
 if [ -n "${VLLM_USE_MODELSCOPE:-}" ]; then
@@ -32,12 +33,12 @@ umask 077
 cat > /etc/wireguard/wg0.conf <<EOF
 [Interface]
 PrivateKey = ${WG_PRIVATE_KEY}
-Address = 10.99.0.2/24
+Address = ${WG_SUBNET}.2/24
 ListenPort = ${WG_LISTEN_PORT}
 
 [Peer]
 PublicKey = ${WG_PEER_PUBKEY}
-AllowedIPs = 10.99.0.1/32
+AllowedIPs = ${WG_SUBNET}.1/32
 PersistentKeepalive = 25
 EOF
 wg-quick up wg0
