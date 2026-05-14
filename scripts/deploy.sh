@@ -47,7 +47,8 @@ case "$PROFILE" in
     WG_SUBNET=10.99.10
     ;;
   sonnet)
-    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100 80GB PCIe}"
+    # A100-SXM4-80GB has Medium stock in Secure (vs Low for A100 PCIe). Same $1.49/GPU/hr.
+    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
     GPU_COUNT="${GPU_COUNT:-2}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-400}"
     MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
