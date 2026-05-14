@@ -6,21 +6,24 @@
 #   ./scripts/deploy.sh haiku       # smallest/cheapest
 #   ./scripts/deploy.sh sonnet      # Sonnet-class
 #   ./scripts/deploy.sh opus        # Opus-class
-#   ./scripts/deploy.sh all         # all three in parallel (3 terminals worth)
+#   ./scripts/deploy.sh all         # all three in parallel
 #
 # Required:  RUNPOD_API_KEY in .env.
+#
+# Architecture:
+#   Cline (localhost:4000) → LiteLLM (Docker) → HTTPS via RunPod's proxy
+#                                              → vLLM on GPU pod (port 8000)
+#   Auth: LiteLLM master key (Cline ↔ LiteLLM); VLLM_API_KEY (LiteLLM ↔ vLLM).
+#   TLS: handled by RunPod's proxy.runpod.net cert.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROFILE="${1:-sonnet}"
 
-# Parallel mode: spawn the three profiles in the background and wait.
+# Parallel mode.
 if [ "$PROFILE" = "all" ]; then
   echo "═ Launching all 3 profiles in parallel"
-  echo "  Each runs independently; output is interleaved. To see logs per-profile,"
-  echo "  run in 3 separate terminals: ./scripts/deploy.sh {haiku,sonnet,opus}"
-  echo
   "$0" haiku  2>&1 | sed 's/^/[haiku]  /' &
   H_PID=$!
   "$0" sonnet 2>&1 | sed 's/^/[sonnet] /' &
@@ -34,27 +37,20 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    # A40 48GB is consistently the most-stocked sub-$0.50/hr Secure GPU (~$0.44/hr).
-    # 48GB easily fits Qwen3-Coder-32B at INT4 + long-context KV cache.
-    # Cheaper-but-flakier swaps if you want: RTX A5000/A6000 (~$0.27–0.49 Low stock),
-    # RTX 4090 ($0.69 Low). Check live stock with the GraphQL gpuTypes query.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A40}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
     MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct}"
     TP_SIZE="${TP_SIZE:-1}"
     MAX_LEN="${MAX_LEN:-65536}"
-    WG_SUBNET=10.99.10
     ;;
   sonnet)
-    # A100-SXM4-80GB has Medium stock in Secure (vs Low for A100 PCIe). Same $1.49/GPU/hr.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
     GPU_COUNT="${GPU_COUNT:-2}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-400}"
     MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
     TP_SIZE="${TP_SIZE:-2}"
     MAX_LEN="${MAX_LEN:-262144}"
-    WG_SUBNET=10.99.20
     ;;
   opus)
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA H100 80GB HBM3}"
@@ -63,7 +59,6 @@ case "$PROFILE" in
     MODEL="${MODEL:-moonshotai/Kimi-K2.6-Instruct}"
     TP_SIZE="${TP_SIZE:-8}"
     MAX_LEN="${MAX_LEN:-131072}"
-    WG_SUBNET=10.99.30
     ;;
   *)
     echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet | opus | all" >&2
@@ -73,8 +68,8 @@ esac
 
 POD_NAME="zdr-coder-${PROFILE}"
 STATE_FILE=".runpod-state.${PROFILE}"
-WG_CONF="wg/${PROFILE}.conf"
-WG_LISTEN_PORT="${WG_LISTEN_PORT:-51820}"
+KEY_FILE=".vllm-key.${PROFILE}"
+PROFILE_UPPER=$(echo "$PROFILE" | tr '[:lower:]' '[:upper:]')
 
 [ -f .env ] || { echo "FAIL: .env missing. cp .env.example .env, set RUNPOD_API_KEY" >&2; exit 1; }
 set -a
@@ -85,11 +80,8 @@ set +a
 GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
 
 # ── Tools ─────────────────────────────────────────────────────
-for t in docker curl jq wg openssl flock; do
-  command -v "$t" >/dev/null 2>&1 || { echo "FAIL: '$t' not on PATH" >&2; \
-    [ "$t" = "wg" ] && echo "  → brew install wireguard-tools (macOS) / apt install wireguard-tools (Linux)" >&2; \
-    [ "$t" = "flock" ] && echo "  → brew install flock (macOS) / built-in on Linux" >&2; \
-    exit 1; }
+for t in docker curl jq openssl flock; do
+  command -v "$t" >/dev/null 2>&1 || { echo "FAIL: '$t' not on PATH" >&2; exit 1; }
 done
 
 RUNPOD_API="https://api.runpod.io/graphql"
@@ -100,7 +92,7 @@ gql() {
     -d "$(jq -n --arg q "$1" --argjson v "$2" '{query: $q, variables: $v}')"
 }
 
-# ── 1. Local keys (shared LiteLLM key + per-deploy WG keys) ───
+# ── 1. Local keys (shared LiteLLM + per-profile vLLM bearer) ─
 echo "═ 1/6 [$PROFILE]  Local keys"
 {
   flock -x 200
@@ -108,22 +100,15 @@ echo "═ 1/6 [$PROFILE]  Local keys"
     openssl rand -hex 32 | awk '{print "sk-"$0}' > .litellm-key
     echo "  ✓ Generated LiteLLM master key (.litellm-key)"
   fi
-  if [ ! -f .wg-laptop-private ]; then
-    umask 077
-    wg genkey > .wg-laptop-private
-    wg pubkey < .wg-laptop-private > .wg-laptop-public
-    echo "  ✓ Generated laptop WG keypair (.wg-laptop-private/.public)"
+  if [ ! -f "$KEY_FILE" ]; then
+    openssl rand -hex 32 > "$KEY_FILE"
+    echo "  ✓ Generated vLLM bearer for $PROFILE ($KEY_FILE)"
   fi
 } 200>.deploy-lock
 LITELLM_MASTER_KEY=$(cat .litellm-key); export LITELLM_MASTER_KEY
-LAPTOP_WG_PRIVKEY=$(cat .wg-laptop-private)
-LAPTOP_WG_PUBKEY=$(cat .wg-laptop-public)
+VLLM_API_KEY=$(cat "$KEY_FILE")
 
-# Fresh GPU-side keypair every deploy of this profile
-GPU_WG_PRIVKEY=$(wg genkey)
-GPU_WG_PUBKEY=$(echo "$GPU_WG_PRIVKEY" | wg pubkey)
-
-# ── 2. Provision RunPod pod for this profile ──────────────────
+# ── 2. Provision RunPod pod ──────────────────────────────────
 echo
 echo "═ 2/6 [$PROFILE]  RunPod pod"
 POD_ID=""
@@ -144,11 +129,7 @@ if [ -z "$POD_ID" ]; then
     --arg gpuType "$GPU_TYPE_ID" \
     --argjson gpuCount "$GPU_COUNT" \
     --argjson disk "$CONTAINER_DISK_GB" \
-    --arg ports "${WG_LISTEN_PORT}/udp,8000/http" \
-    --arg wgPriv "$GPU_WG_PRIVKEY" \
-    --arg wgPeer "$LAPTOP_WG_PUBKEY" \
-    --arg wgPort "$WG_LISTEN_PORT" \
-    --arg wgSubnet "$WG_SUBNET" \
+    --arg vllmKey "$VLLM_API_KEY" \
     --arg model "$MODEL" \
     --arg tp "$TP_SIZE" \
     --arg maxLen "$MAX_LEN" \
@@ -156,15 +137,12 @@ if [ -z "$POD_ID" ]; then
       name: $name, imageName: $image, cloudType: "SECURE",
       gpuTypeId: $gpuType, gpuCount: $gpuCount,
       containerDiskInGb: $disk, volumeInGb: 0,
-      ports: $ports,
+      ports: "8000/http",
       env: [
-        {key: "WG_PRIVATE_KEY", value: $wgPriv},
-        {key: "WG_PEER_PUBKEY", value: $wgPeer},
-        {key: "WG_LISTEN_PORT", value: $wgPort},
-        {key: "WG_SUBNET",      value: $wgSubnet},
-        {key: "MODEL",          value: $model},
-        {key: "TP_SIZE",        value: $tp},
-        {key: "MAX_LEN",        value: $maxLen}
+        {key: "VLLM_API_KEY", value: $vllmKey},
+        {key: "MODEL",        value: $model},
+        {key: "TP_SIZE",      value: $tp},
+        {key: "MAX_LEN",      value: $maxLen}
       ]
     } }')
   R=$(gql 'mutation($input: PodFindAndDeployOnDemandInput) { podFindAndDeployOnDemand(input: $input) { id name } }' "$VARS")
@@ -174,57 +152,50 @@ if [ -z "$POD_ID" ]; then
   echo "  ✓ Created: $POD_ID"
 fi
 
-# ── 3. Wait for RUNNING + discover endpoint ──────────────────
+# Proxy URL pattern: https://[POD_ID]-[PORT].proxy.runpod.net
+API_BASE="https://${POD_ID}-8000.proxy.runpod.net/v1"
+
+# ── 3. Wait for RUNNING ──────────────────────────────────────
 echo
-echo "═ 3/6 [$PROFILE]  Waiting for pod RUNNING + public IP"
-STATUS=""; GPU_PUBLIC_IP=""; GPU_WG_PORT=""
+echo "═ 3/6 [$PROFILE]  Waiting for pod RUNNING"
+STATUS=""
 for i in $(seq 1 60); do
-  R=$(gql 'query($id: String!) { pod(input: {podId: $id}) { desiredStatus runtime { uptimeInSeconds ports { ip isIpPublic privatePort publicPort type } } } }' "{\"id\":\"$POD_ID\"}")
+  R=$(gql 'query($id: String!) { pod(input: {podId: $id}) { desiredStatus runtime { uptimeInSeconds } } }' "{\"id\":\"$POD_ID\"}")
   STATUS=$(echo "$R" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
   UPTIME=$(echo "$R" | jq -r '.data.pod.runtime.uptimeInSeconds // 0')
   if [ "$STATUS" = "RUNNING" ] && [ "$UPTIME" -gt 0 ]; then
-    GPU_PUBLIC_IP=$(echo "$R" | jq -r --arg p "$WG_LISTEN_PORT" '.data.pod.runtime.ports[]? | select(.privatePort == ($p|tonumber) and .isIpPublic == true) | .ip' | head -1)
-    GPU_WG_PORT=$(echo "$R" | jq -r --arg p "$WG_LISTEN_PORT" '.data.pod.runtime.ports[]? | select(.privatePort == ($p|tonumber) and .isIpPublic == true) | .publicPort' | head -1)
-    [ -n "$GPU_PUBLIC_IP" ] && [ -n "$GPU_WG_PORT" ] && { echo "  ✓ RUNNING. WG endpoint: $GPU_PUBLIC_IP:$GPU_WG_PORT"; break; }
+    echo "  ✓ RUNNING (uptime ${UPTIME}s)"
+    break
   fi
   printf "  status=%s uptime=%ss (poll %d/60)\r" "$STATUS" "$UPTIME" "$i"
   sleep 10
 done
 echo
-[ -n "$GPU_PUBLIC_IP" ] && [ -n "$GPU_WG_PORT" ] || { echo "FAIL: didn't discover public WG endpoint" >&2; exit 1; }
+[ "$STATUS" = "RUNNING" ] || { echo "FAIL: pod did not reach RUNNING in 10 min" >&2; exit 1; }
 
-# ── 4. Write WG conf + reload wg-laptop ──────────────────────
+# ── 4. Write env-runtime + bring up LiteLLM ──────────────────
 echo
-echo "═ 4/6 [$PROFILE]  Writing $WG_CONF"
-umask 077
-cat > "$WG_CONF" <<EOF
-[Interface]
-PrivateKey = ${LAPTOP_WG_PRIVKEY}
-Address = ${WG_SUBNET}.1/24
-
-[Peer]
-PublicKey = ${GPU_WG_PUBKEY}
-Endpoint = ${GPU_PUBLIC_IP}:${GPU_WG_PORT}
-AllowedIPs = ${WG_SUBNET}.2/32
-PersistentKeepalive = 25
-EOF
-
-# Bring up the laptop side. Serialize compose operations across parallel deploys.
+echo "═ 4/6 [$PROFILE]  Writing .env-runtime entry"
 {
   flock -x 200
-  if ! docker compose ps wg-laptop --status running 2>/dev/null | grep -q wg-laptop; then
-    echo "  Starting docker compose..."
+  # Preserve any existing per-profile entries, overwrite this profile's only.
+  touch .env-runtime
+  grep -v "^${PROFILE_UPPER}_API_" .env-runtime > .env-runtime.tmp || true
+  cat >> .env-runtime.tmp <<EOF
+${PROFILE_UPPER}_API_BASE=${API_BASE}
+${PROFILE_UPPER}_API_KEY=${VLLM_API_KEY}
+EOF
+  mv .env-runtime.tmp .env-runtime
+
+  if ! docker compose ps litellm --status running 2>/dev/null | grep -q litellm; then
     docker compose up -d >/dev/null 2>&1
-    sleep 4
+    sleep 3
+  else
+    docker compose up -d --force-recreate litellm >/dev/null 2>&1
+    sleep 3
   fi
-  # Bring this profile's interface up inside the container (no restart needed)
-  if docker compose exec -T wg-laptop wg show "$PROFILE" >/dev/null 2>&1; then
-    docker compose exec -T wg-laptop wg-quick down "/config/wg_confs/${PROFILE}.conf" >/dev/null 2>&1 || true
-  fi
-  docker compose exec -T wg-laptop wg-quick up "/config/wg_confs/${PROFILE}.conf" >/dev/null 2>&1 \
-    || { echo "FAIL: couldn't bring up wg interface '$PROFILE' inside container" >&2; exit 1; }
 } 200>.deploy-lock
-echo "  ✓ WG interface '$PROFILE' up; LiteLLM on http://localhost:4000"
+echo "  ✓ LiteLLM on http://localhost:4000 with $PROFILE route active"
 
 # ── 5. Wait for vLLM warmup ──────────────────────────────────
 echo
@@ -254,8 +225,8 @@ cat <<EOF
     API Key:      $LITELLM_MASTER_KEY
     Model ID:     $PROFILE        (or: haiku / sonnet / opus / heavy / plan)
 
-  Pod ID:    $POD_ID
-  WG peer:   $GPU_PUBLIC_IP:$GPU_WG_PORT  →  ${WG_SUBNET}.2
-  Teardown:  ./scripts/destroy.sh $PROFILE   (or 'all')
+  Pod:        $POD_ID
+  vLLM URL:   ${API_BASE} (via RunPod HTTPS proxy)
+  Teardown:   ./scripts/destroy.sh $PROFILE   (or 'all')
 ═══════════════════════════════════════════════════════════
 EOF

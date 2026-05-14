@@ -1,30 +1,16 @@
-# zdr-coder local stack: one WireGuard peer container (multiple interfaces) + LiteLLM.
-# Each profile's WG tunnel = a separate file in wg/ (e.g. wg/sonnet.conf) → separate interface.
-# linuxserver/wireguard reads all *.conf in /config/wg_confs/ at container start.
+# zdr-coder local stack — just LiteLLM. No mesh VPN; the GPU pod is reached via
+# RunPod's HTTPS proxy at https://[POD_ID]-8000.proxy.runpod.net (auth via
+# bearer token set per-profile in .env-runtime).
 
 services:
-  wg-laptop:
-    image: linuxserver/wireguard:latest
-    container_name: zdr-wg
-    restart: unless-stopped
-    cap_add: [NET_ADMIN, SYS_MODULE]
-    sysctls:
-      - net.ipv4.conf.all.src_valid_mark=1
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-    volumes:
-      - ./wg:/config/wg_confs:ro
-    ports:
-      - "127.0.0.1:4000:4000"
-
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: zdr-litellm
     restart: unless-stopped
-    network_mode: service:wg-laptop
-    depends_on: [wg-laptop]
+    ports:
+      - "127.0.0.1:4000:4000"
+    env_file:
+      - .env-runtime
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
     volumes:

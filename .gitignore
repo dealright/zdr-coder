@@ -2,10 +2,7 @@
 .runpod-state
 .runpod-state.*
 .litellm-key
-.wg-laptop-private
-.wg-laptop-public
 .deploy-lock
-wg/*.conf
 .claude/
 .serena/
 social-preview.png
@@ -16,3 +13,5 @@ social-preview.png
 node_modules/
 .idea/
 .vscode/
+.vllm-key.*
+.env-runtime

@@ -1,42 +1,39 @@
-# LiteLLM routes. Three Claude-style tiers, each peered with its own GPU pod
-# over a dedicated WireGuard subnet:
-#   haiku  → 10.99.10.2  (Qwen3-Coder-32B on 1× RTX A5000)
-#   sonnet → 10.99.20.2  (DeepSeek V4 Flash on 2× A100 SXM)
-#   opus   → 10.99.30.2  (Kimi K2.6 on 8× H100 SXM)
-# Aliases work even if only one profile is deployed; routes to undeployed peers
-# return 502 (no peer reachable).
+# LiteLLM routes. Each profile points at its pod's RunPod HTTPS proxy.
+# Proxy URLs + per-profile bearer tokens are populated by scripts/deploy.sh into
+# .env-runtime, which docker-compose loads. Undeployed profiles return 502 (env
+# vars unset → unreachable target) — that's expected.
 
 model_list:
   - model_name: haiku
     litellm_params:
       model: openai/inference
-      api_base: http://10.99.10.2:8000/v1
-      api_key: not-used-but-required
+      api_base: os.environ/HAIKU_API_BASE
+      api_key: os.environ/HAIKU_API_KEY
 
   - model_name: sonnet
     litellm_params:
       model: openai/inference
-      api_base: http://10.99.20.2:8000/v1
-      api_key: not-used-but-required
+      api_base: os.environ/SONNET_API_BASE
+      api_key: os.environ/SONNET_API_KEY
 
   - model_name: opus
     litellm_params:
       model: openai/inference
-      api_base: http://10.99.30.2:8000/v1
-      api_key: not-used-but-required
+      api_base: os.environ/OPUS_API_BASE
+      api_key: os.environ/OPUS_API_KEY
 
-  # Aliases for back-compat. Default `heavy` and `plan` route to sonnet.
+  # Back-compat aliases: heavy/plan → sonnet
   - model_name: heavy
     litellm_params:
       model: openai/inference
-      api_base: http://10.99.20.2:8000/v1
-      api_key: not-used-but-required
+      api_base: os.environ/SONNET_API_BASE
+      api_key: os.environ/SONNET_API_KEY
 
   - model_name: plan
     litellm_params:
       model: openai/inference
-      api_base: http://10.99.20.2:8000/v1
-      api_key: not-used-but-required
+      api_base: os.environ/SONNET_API_BASE
+      api_key: os.environ/SONNET_API_KEY
 
 litellm_settings:
   drop_params: true

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Smoke-test one profile end-to-end:
-#   Cline → LiteLLM (local) → WireGuard → vLLM (remote GPU)
-# Usage:
-#   ./scripts/smoketest.sh              # default: sonnet
-#   ./scripts/smoketest.sh haiku|sonnet|opus
+#   Cline → LiteLLM (local) → HTTPS via RunPod proxy → vLLM (remote GPU)
+# Usage:  ./scripts/smoketest.sh [haiku|sonnet|opus]   (default: sonnet)
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +11,7 @@ case "$PROFILE" in haiku|sonnet|opus) ;; *)
   echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet | opus" >&2; exit 1 ;;
 esac
 
-[ -f .env ] || { echo "FAIL: .env missing. Run scripts/preflight.sh first." >&2; exit 1; }
+[ -f .env ] || { echo "FAIL: .env missing." >&2; exit 1; }
 set -a
 . ./.env
 set +a
@@ -22,11 +20,6 @@ LITELLM_MASTER_KEY=$(cat .litellm-key 2>/dev/null) || \
   { echo "FAIL: .litellm-key not found. Run deploy.sh first." >&2; exit 1; }
 
 ENDPOINT="${LITELLM_ENDPOINT:-http://localhost:4000/v1/chat/completions}"
-
-echo "→ POST ${ENDPOINT}"
-echo "→ model: ${PROFILE}"
-echo "→ prompt: \"Reply with the word PONG only.\""
-echo
 
 RESP=$(curl -sS --max-time 90 \
   -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
@@ -53,13 +46,11 @@ if [ -n "${ERROR}" ]; then
   echo "FAIL [${PROFILE}]: ${ERROR}" >&2
   shopt -s nocasematch
   case "${ERROR}" in
-    *"connection refused"*|*"could not connect"*|*"no route to host"*)
-      echo "  → vLLM/WG unreachable for $PROFILE. Inside the WG container:" >&2
-      echo "      docker compose exec wg-laptop wg show $PROFILE" >&2
-      echo "      (look for 'latest handshake'; if blank, peer isn't connecting)" >&2
-      ;;
+    *"connection refused"*|*"could not connect"*|*"no route to host"*|*"timed out"*|*"unreachable"*)
+      echo "  → vLLM proxy unreachable. The pod may still be cold-starting (10–20 min)." >&2
+      echo "  → Check the RunPod console: https://www.runpod.io/console/pods" >&2 ;;
     *"unauthorized"*|*"invalid"*"api"*)
-      echo "  → LiteLLM master key mismatch. Check .litellm-key vs Cline config." >&2 ;;
+      echo "  → API key mismatch. Verify .litellm-key (Cline ↔ LiteLLM) and .vllm-key.${PROFILE} (LiteLLM ↔ vLLM)." >&2 ;;
     *"not ready"*|*"loading"*|*"starting"*)
       echo "  → vLLM still warming up. Wait 1–2 min and re-run." >&2 ;;
   esac
@@ -68,9 +59,7 @@ if [ -n "${ERROR}" ]; then
 fi
 
 if [ -z "${CONTENT}" ]; then
-  echo "FAIL [${PROFILE}]: empty content. Raw:" >&2
-  echo "${RESP}" | head -c 500 >&2; echo >&2
-  exit 1
+  echo "FAIL [${PROFILE}]: empty content. Raw: $(echo "${RESP}" | head -c 300)" >&2; exit 1
 fi
 
 if echo "${CONTENT}" | grep -qi "PONG"; then
