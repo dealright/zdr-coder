@@ -1,6 +1,6 @@
-# zdr-coder local stack: WireGuard peer + LiteLLM. No control plane, no third party.
-#   wg-laptop  → WireGuard interface that peers directly with the GPU pod
-#   litellm    → OpenAI-compatible proxy, exposed only on 127.0.0.1:4000
+# zdr-coder local stack: one WireGuard peer container (multiple interfaces) + LiteLLM.
+# Each profile's WG tunnel = a separate file in wg/ (e.g. wg/sonnet.conf) → separate interface.
+# linuxserver/wireguard reads all *.conf in /config/wg_confs/ at container start.
 
 services:
   wg-laptop:
@@ -15,7 +15,7 @@ services:
       - PGID=1000
       - TZ=UTC
     volumes:
-      - ./wg/laptop.conf:/config/wg_confs/wg0.conf:ro
+      - ./wg:/config/wg_confs:ro
     ports:
       - "127.0.0.1:4000:4000"
 

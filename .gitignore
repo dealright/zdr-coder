@@ -1,9 +1,11 @@
 .env
 .runpod-state
+.runpod-state.*
 .litellm-key
 .wg-laptop-private
 .wg-laptop-public
-wg/laptop.conf
+.deploy-lock
+wg/*.conf
 .claude/
 .serena/
 social-preview.png
