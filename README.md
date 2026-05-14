@@ -54,7 +54,7 @@ Three steps.
 
 ### 1. Get a RunPod API key
 
-https://www.runpod.io/console/user/settings → **API Keys** → **Create API Key**.
+https://console.runpod.io/user/settings → **API Keys** → **Create API Key**.
 
 Permissions: **Read/Write on `api.runpod.io/graphql`**. No access needed to `api.runpod.ai` (that's their own hosted-inference API, not used here).
 

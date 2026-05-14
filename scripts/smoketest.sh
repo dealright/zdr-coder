@@ -48,7 +48,7 @@ if [ -n "${ERROR}" ]; then
   case "${ERROR}" in
     *"connection refused"*|*"could not connect"*|*"no route to host"*|*"timed out"*|*"unreachable"*)
       echo "  → vLLM proxy unreachable. The pod may still be cold-starting (10–20 min)." >&2
-      echo "  → Check the RunPod console: https://www.runpod.io/console/pods" >&2 ;;
+      echo "  → Check the RunPod console: https://console.runpod.io/pods" >&2 ;;
     *"unauthorized"*|*"invalid"*"api"*)
       echo "  → API key mismatch. Verify .litellm-key (Cline ↔ LiteLLM) and .vllm-key.${PROFILE} (LiteLLM ↔ vLLM)." >&2 ;;
     *"not ready"*|*"loading"*|*"starting"*)

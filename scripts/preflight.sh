@@ -49,7 +49,7 @@ set -a
 set +a
 
 if [ -z "${RUNPOD_API_KEY:-}" ] || [[ "$RUNPOD_API_KEY" == "runpod_replace_with_real_key" ]]; then
-  fail "RUNPOD_API_KEY is unset or placeholder" "Get one at https://www.runpod.io/console/user/settings"
+  fail "RUNPOD_API_KEY is unset or placeholder" "Get one at https://console.runpod.io/user/settings"
 else
   pass "RUNPOD_API_KEY set (${RUNPOD_API_KEY:0:14}...)"
 fi

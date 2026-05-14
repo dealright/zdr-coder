@@ -35,7 +35,7 @@ case "${MODEL,,}" in
 esac
 
 echo "[start.sh] Launching vLLM: model=$MODEL TP=$TP_SIZE MAX_LEN=$MAX_LEN"
-exec python -m vllm.entrypoints.openai.api_server \
+exec python3 -m vllm.entrypoints.openai.api_server \
   --model "$MODEL" \
   --tensor-parallel-size "$TP_SIZE" \
   --max-model-len "$MAX_LEN" \
