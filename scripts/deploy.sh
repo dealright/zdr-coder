@@ -179,7 +179,7 @@ echo
 echo "═ 3/6 [$PROFILE]  Waiting for pod RUNNING + public IP"
 STATUS=""; GPU_PUBLIC_IP=""; GPU_WG_PORT=""
 for i in $(seq 1 60); do
-  R=$(gql 'query($id: String!) { pod(input: {podId: $id}) { desiredStatus runtime { uptimeInSeconds podIp ports { ip isIpPublic privatePort publicPort type } } } }' "{\"id\":\"$POD_ID\"}")
+  R=$(gql 'query($id: String!) { pod(input: {podId: $id}) { desiredStatus runtime { uptimeInSeconds ports { ip isIpPublic privatePort publicPort type } } } }' "{\"id\":\"$POD_ID\"}")
   STATUS=$(echo "$R" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
   UPTIME=$(echo "$R" | jq -r '.data.pod.runtime.uptimeInSeconds // 0')
   if [ "$STATUS" = "RUNNING" ] && [ "$UPTIME" -gt 0 ]; then
