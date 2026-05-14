@@ -151,7 +151,6 @@ if [ -z "$POD_ID" ]; then
       name: $name, imageName: $image, cloudType: "SECURE",
       gpuTypeId: $gpuType, gpuCount: $gpuCount,
       containerDiskInGb: $disk, volumeInGb: 0,
-      minVcpuCount: 4, minMemoryInGb: 16,
       ports: $ports,
       env: [
         {key: "WG_PRIVATE_KEY", value: $wgPriv},
