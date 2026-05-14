@@ -13,16 +13,24 @@ TP_SIZE="${TP_SIZE:-2}"
 MAX_LEN="${MAX_LEN:-262144}"
 GPU_UTIL="${GPU_UTIL:-0.92}"
 
-# Model source: HF-Mirror by default (no token required for public models).
+# Model source resolution.
+#   VLLM_USE_MODELSCOPE=1 → ModelScope (Alibaba, no token)
+#   HF_TOKEN set         → HuggingFace authenticated (required for gated models
+#                          like DeepSeek V4 Flash, Kimi K2.6)
+#   HF_ENDPOINT set      → custom HF-compatible endpoint (e.g. hf-mirror, but
+#                          most aren't reachable from US-hosted GPU clouds)
+#   else                 → HuggingFace anonymous — fine for ungated public
+#                          models (Qwen3-Coder-*, most Mistral/Llama-2 etc.)
 if [ -n "${VLLM_USE_MODELSCOPE:-}" ]; then
   export VLLM_USE_MODELSCOPE=True
   echo "[start.sh] Model source: ModelScope"
 elif [ -n "${HF_TOKEN:-}" ]; then
   export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
-  echo "[start.sh] Model source: HuggingFace (with token)"
+  echo "[start.sh] Model source: HuggingFace (authenticated)"
+elif [ -n "${HF_ENDPOINT:-}" ]; then
+  echo "[start.sh] Model source: ${HF_ENDPOINT} (custom)"
 else
-  export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-  echo "[start.sh] Model source: HF-Mirror at $HF_ENDPOINT (no token)"
+  echo "[start.sh] Model source: HuggingFace (anonymous, ungated models only)"
 fi
 
 # `--enable-expert-parallel` is a no-op on dense models and required for MoE.

@@ -135,17 +135,18 @@ if [ -z "$POD_ID" ]; then
     --arg model "$MODEL" \
     --arg tp "$TP_SIZE" \
     --arg maxLen "$MAX_LEN" \
+    --arg hfTok "${HF_TOKEN:-}" \
     '{ input: {
       name: $name, imageName: $image, cloudType: "SECURE",
       gpuTypeId: $gpuType, gpuCount: $gpuCount,
       containerDiskInGb: $disk, volumeInGb: 0,
       ports: "8000/http",
-      env: [
+      env: ([
         {key: "VLLM_API_KEY", value: $vllmKey},
         {key: "MODEL",        value: $model},
         {key: "TP_SIZE",      value: $tp},
         {key: "MAX_LEN",      value: $maxLen}
-      ]
+      ] + ($hfTok | if . != "" then [{key: "HF_TOKEN", value: .}] else [] end))
     } }')
   R=$(gql 'mutation($input: PodFindAndDeployOnDemandInput) { podFindAndDeployOnDemand(input: $input) { id name } }' "$VARS")
   POD_ID=$(echo "$R" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
