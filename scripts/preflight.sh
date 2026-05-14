@@ -32,6 +32,13 @@ else
   pass "openssl available"
 fi
 
+# 3b. wireguard-tools (for generating WG keypairs)
+if ! command -v wg >/dev/null 2>&1; then
+  fail "wg (wireguard-tools) not on PATH" "Install: brew install wireguard-tools (macOS) / apt install wireguard-tools (Linux)"
+else
+  pass "wireguard-tools available"
+fi
+
 # 4. .env exists
 if [ ! -f .env ]; then
   fail ".env file missing" "Run: cp .env.example .env, then fill in real values"

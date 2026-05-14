@@ -1,6 +1,12 @@
 .env
 .runpod-state
+.litellm-key
+.wg-laptop-private
+.wg-laptop-public
+wg/laptop.conf
 .claude/
+.serena/
+social-preview.png
 *.local
 .DS_Store
 **/__pycache__/

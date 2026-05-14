@@ -4,12 +4,15 @@
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](#what-zdr-means-here)
 [![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20RunPod%20BAA-purple.svg)](https://www.runpod.io/press/runpod-meets-hipaa-and-gdpr-standards)
 
-**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** Cline talks to your own Kimi K2.6 or DeepSeek V4 Flash deployment over a Tailscale mesh. No third-party model provider sees your prompts. One-line deploy, one-line teardown. HIPAA-eligible via the underlying RunPod Secure BAA.
+**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** One-line deploy. Cline talks to your own open-source model on rented GPUs over a private WireGuard tunnel. No third-party model provider, no Tailscale cloud, no Cloudflare, no Hugging Face token — just RunPod for the GPU.
 
-| Profile | Model | GPUs | $/hr | Quality |
-|---|---|---|---|---|
-| **default** | DeepSeek V4 Flash (284B / 13B active) | 2× H200 | ~$8.62 | ~Sonnet 4.6 / just under Opus 4.6 |
-| **upgrade** | Kimi K2.6 INT4 (1.1T / 32B active) | 8× H100 SXM | ~$23.92 | Beats Opus 4.6 on SWE-bench Pro |
+## Three profiles, one variable to switch
+
+| Profile | Closest Claude | Open-source model | GPU shape | $/hr | $/mo @ 80 h |
+|---|---|---|---|---|---|
+| **haiku** | Haiku 4.5 | Qwen3-Coder-32B | 1× RTX A5000 24GB | **$0.27** | $22 |
+| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 2× A100 SXM 80GB | **$2.98** | $238 |
+| **opus** | Opus 4.7 | Kimi K2.6 INT4 | 8× H100 SXM | **$23.92** | $1,914 |
 
 ## Architecture
 
@@ -18,197 +21,130 @@ flowchart LR
     subgraph laptop["Your laptop"]
         Cline["VSCodium + Cline"]
         LiteLLM["LiteLLM proxy<br/>Docker, :4000"]
-        Cline -->|"OpenAI-compat<br/>localhost"| LiteLLM
+        WG1["WireGuard peer<br/>10.99.0.1"]
+        Cline -->|"localhost:4000"| LiteLLM
+        LiteLLM -.-> WG1
     end
-    subgraph tailnet["Tailscale tailnet (WireGuard, E2E encrypted)"]
-        LiteLLM -.-> vLLM
+    subgraph wgmesh["WireGuard UDP/51820 — E2E encrypted, no control plane"]
     end
     subgraph gpu["Rented GPU pod (RunPod Secure)"]
-        vLLM["vLLM<br/>OpenAI-compatible"]
-        vLLM --> Model[("Kimi K2.6 or<br/>DeepSeek V4 Flash")]
+        WG2["WireGuard peer<br/>10.99.0.2"]
+        vLLM["vLLM<br/>OpenAI-compatible :8000"]
+        Model[("Qwen / DeepSeek / Kimi")]
+        WG2 --> vLLM --> Model
     end
+    WG1 -.-> wgmesh -.-> WG2
 ```
 
-- **Tailscale** = WireGuard mesh. No public ports on the GPU host. Only your tailnet can reach it.
+- **WireGuard** = direct peer-to-peer E2E-encrypted UDP. No control plane, no Tailscale cloud, no Headscale, no Cloudflare. Just two endpoints exchanging public keys.
 - **LiteLLM** = local OpenAI-compatible proxy. Routes per-mode aliases, holds master API key.
-- **vLLM** = OpenAI-compatible model server. Native FP4+FP8 for DeepSeek; block-FP8 or INT4 quant for Kimi.
-- **Cline** = the agentic coding extension. Talks to LiteLLM on localhost.
+- **vLLM** = OpenAI-compatible model server. Downloads weights from HF-Mirror (no token) by default.
+- **Cline** = the agentic coding extension in VSCodium. Talks to LiteLLM on localhost.
 
 ## What ZDR means here
 
-Self-hosting collapses the data-retention surface to **just the GPU host**. There is no managed model provider in the path. The Tailscale tunnel is end-to-end encrypted. LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Nothing about your prompts touches a third party.
+There is no managed model provider in the path. The WireGuard tunnel is E2E encrypted between exactly two endpoints (your laptop and your GPU pod). LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Nothing about your prompts touches a third party.
 
-For HIPAA: RunPod offers BAA-eligible Secure Cloud. Email `support@runpod.io` to execute (1–2 business day turnaround). Salad SCE Secure is a cheaper alternative — **but it is SOC 2 Type I only with no HIPAA badge**, so it's suitable only for non-PHI workloads.
-
-## Choose your GPU host
-
-| Host | 2×H200 $/hr | 8×H100 SXM $/hr | Privacy / legal posture |
-|---|---|---|---|
-| **RunPod Secure** (default) | ~$7.98–$8.62 | $23.92 | SOC 2 Type I, public HIPAA + GDPR claim (Feb 2026), BAA via support |
-| Salad SCE Secure (Batch) | n/a (H100 NVL only) | **$7.92** (preemptible) | SOC 2 Type I; 2022 privacy policy, $10 liability cap, no HIPAA — **non-PHI only** |
-| Lambda 1-Click | ~$8.58 | $23.92 | Enterprise BAA only |
-| Vast.ai interruptible | varies | ~$8–12 | No central program — marketplace |
-
-`scripts/deploy.sh` targets RunPod Secure. To use a different host, provision manually (see [§Manual provisioning](#manual-provisioning-without-deploysh)).
+For HIPAA: RunPod offers BAA-eligible Secure Cloud — email `support@runpod.io` to execute (1–2 business day turnaround, no Enterprise contract required).
 
 ## Setup
 
-Just three things to do before deploying:
+Just three things to do:
 
-### 1. Collect five keys
+### 1. Get a RunPod API key
 
-- **Tailscale auth key** — https://login.tailscale.com/admin/settings/keys → Generate, toggle **Reusable** + **Ephemeral**
-- **Hugging Face token** — https://huggingface.co/settings/tokens (read scope), then accept the V4 Flash license: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
-- **RunPod API key** — https://www.runpod.io/console/user/settings
-- **LiteLLM master key** — `openssl rand -hex 32`
-- **Your container registry path** (Docker Hub / GHCR, both free)
+https://www.runpod.io/console/user/settings → API Keys → Create. Add credits to your account.
 
-### 2. Build & push the GPU image
+### 2. Install prerequisites
 
-You have two options:
+- **Docker** — https://docker.com
+- **WireGuard tools** — `brew install wireguard-tools` (macOS) or `apt install wireguard-tools` (Linux)
+- **VSCodium** + **Cline** extension — https://open-vsx.org/extension/saoudrizwan/claude-dev
 
-**Option A — Use the pre-built image** (recommended if available on your fork's GHCR):
-
-```bash
-# In .env, set:
-#   GPU_IMAGE=ghcr.io/OWNER/zdr-coder-gpu:latest
-# where OWNER is the GitHub user/org hosting the repo. No build step needed.
-```
-
-**Option B — Build & push it yourself** (works with any registry — Docker Hub, GHCR, ECR):
-
-```bash
-cd gpu-node
-docker build -t ghcr.io/YOUR_USER/zdr-coder-gpu:latest .
-docker push ghcr.io/YOUR_USER/zdr-coder-gpu:latest
-```
-
-GHCR is recommended for public projects (free, integrated with the repo, signs in via `gh auth token`). For Docker Hub, swap `ghcr.io/YOUR_USER` for `docker.io/YOUR_USER`.
-
-### 3. Fill `.env` and deploy
+### 3. Configure & deploy
 
 ```bash
 cp .env.example .env
-$EDITOR .env            # paste the five values from step 1
-./scripts/deploy.sh     # ← one command does everything
+$EDITOR .env             # set RUNPOD_API_KEY (only required value)
+./scripts/deploy.sh      # one command does everything
 ```
 
-`deploy.sh` runs preflight, provisions a RunPod Secure pod via GraphQL, waits for it to enter RUNNING and join your tailnet, brings up local LiteLLM via docker compose, polls for vLLM warmup (~10–20 min), runs the end-to-end smoketest, and prints your Cline configuration.
+`deploy.sh` generates WireGuard keypairs, provisions a RunPod Secure pod with the GPU keypair + your public key as env vars, discovers the pod's public IP, writes the laptop-side `wg/laptop.conf`, brings up local LiteLLM + WireGuard via docker-compose, waits for vLLM warmup (~10–20 min cold), and runs the end-to-end smoketest.
 
 When you're done coding:
 
 ```bash
-./scripts/destroy.sh    # terminates pod (billing stops in ~1 min) + stops local LiteLLM
+./scripts/destroy.sh     # terminates pod (billing stops in ~1 min) + stops local stack
 ```
 
-### 4. Configure Cline (one-time)
+### 4. Point Cline at it
 
-Paste the values `deploy.sh` printed into VSCodium → Cline → gear:
+The deploy script prints these — paste into VSCodium → Cline → gear:
 
 - **API Provider**: OpenAI Compatible
 - **Base URL**: `http://localhost:4000/v1`
-- **API Key**: your `LITELLM_MASTER_KEY` from `.env`
+- **API Key**: from `.litellm-key` (auto-generated on first deploy)
 - **Model ID**: `heavy`
 
-### Switching profiles (V4 Flash ↔ K2.6)
+## Switching profiles
 
-Uncomment the upgrade-profile block in `.env`, then:
+Uncomment one of the `haiku` / `sonnet` / `opus` blocks in `.env`, then:
 
 ```bash
 ./scripts/destroy.sh && ./scripts/deploy.sh
 ```
 
-### Manual provisioning (without deploy.sh)
-
-If you'd rather click through your GPU host's UI: set env vars `TS_AUTHKEY`, `TS_HOSTNAME=zdr-coder-gpu`, `HF_TOKEN`, `MODEL`, `TP_SIZE`, `MAX_LEN` on the container. Container Disk: 400 GB for V4 Flash, 700 GB for K2.6. No public ports needed — Tailscale handles ingress. Then on your laptop: `./scripts/preflight.sh && docker compose up -d && ./scripts/smoketest.sh`.
-
-## Costs
-
-Active GPU-hour rates only — your laptop and LiteLLM are free. Token costs are zero (you own the model).
-
-### V4 Flash on 2-GPU (default)
-
-| Host (2× GPU) | $/hr | $/mo @ 80 hrs |
-|---|---|---|
-| RunPod Secure 2× H200 | ~$8.62 (Instant Cluster) | ~$690 |
-| RunPod Secure 2× RTX 6000 Pro 96GB | ~$3.78 | ~$302 |
-| RunPod Secure 2× H100 PCIe 80GB | ~$4.78 | ~$382 |
-| RunPod Secure 2× A100 SXM 80GB | ~$2.98 | ~$238 |
-
-### K2.6 on 8-GPU (upgrade)
-
-| Host | $/hr | $/mo @ 80 hrs |
-|---|---|---|
-| Salad SCE Batch 8× H100 NVL (non-PHI) | $7.92 (preemptible) | $634 |
-| RunPod Secure 8× A100 SXM | ~$11.92 | ~$954 |
-| RunPod Secure 8× H100 SXM | ~$23.92 | ~$1,914 |
-
-### Break-even vs managed APIs
-
-For typical solo dev use (~10M output tokens/month):
-
-- **DeepInfra Kimi K2.6 API**: ~$60/mo
-- **Anthropic Opus 4.6**: ~$400/mo
-- **Self-host V4 Flash on RunPod 2×H200**: ~$690/mo @ 80hrs
-
-Self-host wins on **compliance posture and unlimited tokens**, not raw cost. The math flips toward self-host when you're at >$300/mo API spend, sharing the GPU across 3+ engineers, or you specifically need no third-party model provider in the path.
-
 ## How `zdr-coder` compares to similar projects
 
 | Project | Closeness | Differs |
 |---|---|---|
-| [**Leafcloud `tf-leafcloud-opencode`**](https://docs.leaf.cloud/en/latest/private-llm/team-opencode-vllm/) | ~70% | OpenCode TUI (not Cline), CIDR allowlist (not Tailscale), no LiteLLM, Leafcloud-only, no BAA |
-| **OpenClaw + vLLM on Vast.ai / Salad** | ~65% | OpenClaw runtime, no LiteLLM Anthropic shim, no Tailscale, no BAA-host pairing |
-| [**Netclode**](https://github.com/angristan/netclode) | ~55% | Mobile/iOS client, Ollama not vLLM, k3s + microVM-per-session |
-| ZeroClaw + LiteLLM + vLLM in Docker | ~50% | DGX Spark focus, no Tailscale, ZeroClaw not Cline |
-| BentoVLLM / OpenLLM | ~50% | Just the "model → OpenAI endpoint" piece, no client/network/host glue |
+| [Leafcloud `tf-leafcloud-opencode`](https://docs.leaf.cloud/en/latest/private-llm/team-opencode-vllm/) | ~70% | OpenCode TUI (not Cline), CIDR allowlist (not WG), Leafcloud-only, no BAA |
+| OpenClaw + vLLM on Vast.ai / Salad | ~65% | OpenClaw runtime, no LiteLLM Anthropic shim, no mesh networking |
+| [Netclode](https://github.com/angristan/netclode) | ~55% | Mobile/iOS client, Ollama not vLLM, k3s + microVM-per-session |
+| ZeroClaw + LiteLLM + vLLM in Docker | ~50% | DGX Spark focus, no WG, ZeroClaw not Cline |
+| BentoVLLM / OpenLLM | ~50% | Just the "model → OpenAI endpoint" piece |
 
-**The differentiation**: nobody else ships specifically *VSCodium + Cline + LiteLLM (as Anthropic→OpenAI shim) + Tailscale (as auth) + vLLM + rented-GPU template + HIPAA-eligible host*. The closest is Leafcloud's tf-opencode (different client, different network), and OpenClaw with vLLM on Vast (different client, no Tailscale).
-
-Position: **compliance-grade Claude Code in 30 minutes on rented GPUs with mesh-VPN auth**, not "yet another self-hosted Claude Code."
+**The differentiation**: nobody else ships specifically *VSCodium + Cline + LiteLLM + pure WireGuard (no control plane) + rented-GPU template + HIPAA-eligible host*. Position is compliance-grade Claude Code in 30 minutes on rented GPUs with peer-to-peer mesh.
 
 ## Caveats
 
-- **RunPod BAA is a separate process.** Email `support@runpod.io` if you need it — 1–2 business days, no Enterprise commitment required.
-- **Cold start is slow.** ~10–20 min for V4 Flash; ~20–30 min for K2.6 INT4. Keep the node up during a work session, stop overnight.
-- **Tailscale auth keys can be rotated.** Compromised? Regenerate, redeploy both containers.
-- **No persistent vLLM cache by default.** Weights re-download on every fresh container. RunPod and Vast support persistent volumes; Salad ephemeral does not.
-- **Salad SCE Secure is non-PHI only.** SOC 2 Type I, 2022-dated privacy policy, $10 liability cap. Fine for batch compute on non-sensitive data; not for healthcare.
-- **Vendor model gating.** DeepSeek V4 and Kimi K2.6 require accepting a license on Hugging Face before download. Do this once per HF account.
+- **RunPod BAA is a separate process.** Email `support@runpod.io` if you need it — 1–2 business days, no Enterprise commitment.
+- **Cold start is slow.** ~10–20 min for sonnet/haiku; ~20–30 min for opus (Kimi K2.6 weights are large). Keep the node up during a work session, destroy overnight.
+- **No persistent vLLM cache by default.** Weights re-download on every fresh pod. RunPod supports persistent volumes if you want to keep them.
+- **HF-Mirror is community-run.** Reliable for most public models. If a model isn't mirrored, set `HF_TOKEN` in `.env` to fall back to the original HF (some models still need license acceptance there).
 
 ## Files
 
 ```
 .
-├── README.md                   # this file
-├── LICENSE                     # MIT
-├── docker-compose.yml          # LiteLLM + Tailscale sidecar (laptop)
-├── litellm/config.yaml         # model routes
+├── README.md
+├── LICENSE                    # MIT
+├── docker-compose.yml         # WireGuard peer + LiteLLM (laptop)
+├── litellm/config.yaml        # model routes
 ├── gpu-node/
-│   ├── Dockerfile              # vLLM + Tailscale image
-│   └── start.sh                # container entrypoint
+│   ├── Dockerfile             # vLLM + wireguard-tools image
+│   └── start.sh               # container entrypoint
 ├── scripts/
-│   ├── deploy.sh               # one-line deploy: RunPod pod + LiteLLM + smoketest
-│   ├── destroy.sh              # one-line teardown
-│   ├── preflight.sh            # validates prereqs + .env
-│   └── smoketest.sh            # end-to-end path test
-├── .env.example                # secrets template (5 required vars)
+│   ├── deploy.sh              # one-line deploy
+│   ├── destroy.sh             # one-line teardown
+│   ├── preflight.sh           # validates prereqs + .env
+│   └── smoketest.sh           # end-to-end path test
+├── wg/                        # generated WG config (gitignored)
+├── .env.example               # 1 required value
 └── .gitignore
 ```
 
 ## Troubleshooting
 
-**Cline says "API key invalid"** — master key mismatch. Verify `.env` matches what Cline has configured.
+**`smoketest.sh` returns FAIL** — read its output; it names the broken hop.
 
-**Cline says "Connection refused"** — LiteLLM not running. `docker compose logs litellm`.
+**WireGuard handshake doesn't happen** — `docker compose exec wg-laptop wg show wg0` shows the peer with `latest handshake` once it's working. If empty, the GPU pod's UDP port may not be exposed properly. Check the RunPod console for the pod's port mappings.
 
-**`smoketest.sh` returns FAIL** — read its output; it names the specific broken hop and the next command to run.
+**vLLM "out of memory"** — shrink `MAX_LEN` or lower `--gpu-memory-utilization` to `0.88` in `gpu-node/start.sh`.
 
-**vLLM "out of memory"** —
-- V4 Flash on 2× H100 80GB: shrink `MAX_LEN` to `131072` or lower `--gpu-memory-utilization` to `0.88`.
-- K2.6 on 8× H100: 640 GB total is tight for native FP8 — make sure you're loading an INT4 quant.
+**Model download fails from HF-Mirror** — set `HF_TOKEN=hf_...` in `.env` to fall back to the original HuggingFace.
 
-**"Permission denied" pulling weights from HF** — visit the model card while signed in to HF and accept the license; verify `HF_TOKEN` is correct.
+**`wg` not found** — `brew install wireguard-tools` (macOS) or `apt install wireguard-tools` (Linux).
 
 ## Reporting vulnerabilities
 

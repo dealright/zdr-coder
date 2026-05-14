@@ -1,33 +1,30 @@
+# zdr-coder local stack: WireGuard peer + LiteLLM. No control plane, no third party.
+#   wg-laptop  → WireGuard interface that peers directly with the GPU pod
+#   litellm    → OpenAI-compatible proxy, exposed only on 127.0.0.1:4000
+
 services:
-  # Tailscale sidecar: joins the tailnet and shares its network namespace with LiteLLM.
-  # This lets LiteLLM reach the GPU node via Tailscale MagicDNS (e.g. http://kimi-gpu:8000).
-  ts-litellm:
-    image: tailscale/tailscale:latest
-    container_name: ts-litellm
-    hostname: ${LITELLM_HOSTNAME:-litellm-laptop}
-    environment:
-      - TS_AUTHKEY=${TS_AUTHKEY}
-      - TS_HOSTNAME=${LITELLM_HOSTNAME:-litellm-laptop}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=false
-      - TS_EXTRA_ARGS=--accept-routes
-    ports:
-      - "127.0.0.1:4000:4000"  # LiteLLM exposed only on laptop's localhost
-    volumes:
-      - ts-litellm-state:/var/lib/tailscale
-      - /dev/net/tun:/dev/net/tun
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
+  wg-laptop:
+    image: linuxserver/wireguard:latest
+    container_name: zdr-wg
     restart: unless-stopped
+    cap_add: [NET_ADMIN, SYS_MODULE]
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./wg/laptop.conf:/config/wg_confs/wg0.conf:ro
+    ports:
+      - "127.0.0.1:4000:4000"
 
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
-    container_name: litellm
-    network_mode: service:ts-litellm  # share tailnet with sidecar
-    depends_on:
-      ts-litellm:
-        condition: service_started
+    container_name: zdr-litellm
+    restart: unless-stopped
+    network_mode: service:wg-laptop
+    depends_on: [wg-laptop]
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
     volumes:
@@ -39,7 +36,3 @@ services:
       - "4000"
       - --host
       - "0.0.0.0"
-    restart: unless-stopped
-
-volumes:
-  ts-litellm-state:

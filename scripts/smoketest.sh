@@ -58,8 +58,9 @@ if [ -n "${ERROR}" ]; then
   case "${ERROR}" in
     *"connection refused"*|*"could not connect"*|*"no route to host"*)
       echo "  → vLLM unreachable. From this machine with Tailscale running:" >&2
-      echo "      tailscale status         # is 'zdr-coder-gpu' listed?" >&2
-      echo "      curl http://zdr-coder-gpu:8000/v1/models" >&2
+      echo "      docker compose logs wg-laptop | tail -20    # check WG handshake" >&2
+      echo "      docker compose exec wg-laptop wg show wg0   # peer should show latest handshake" >&2
+      echo "      docker compose exec wg-laptop curl http://10.99.0.2:8000/v1/models" >&2
       ;;
     *"unauthorized"*|*"invalid"*"api"*|*"invalid api key"*)
       echo "  → LiteLLM master key mismatch. Verify .env matches what Cline sends." >&2
