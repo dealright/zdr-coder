@@ -37,10 +37,12 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
+    # AWQ-INT4 quant ~20GB on disk, ~22GB loaded → fits A40 48GB with full 64K KV.
+    # Original Qwen3-Coder-32B-Instruct (BF16) is ~64GB and would OOM on A40.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A40}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
-    MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct}"
+    MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct-AWQ}"
     TP_SIZE="${TP_SIZE:-1}"
     MAX_LEN="${MAX_LEN:-65536}"
     ;;
