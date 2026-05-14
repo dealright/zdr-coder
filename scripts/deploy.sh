@@ -132,7 +132,7 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 if [ -z "$POD_ID" ]; then
-  echo "  Provisioning $GPU_COUNT× $GPU_TYPE_ID, model=$MODEL..."
+  echo "  Provisioning ${GPU_COUNT}x ${GPU_TYPE_ID}, model=${MODEL}..."
   VARS=$(jq -n \
     --arg name "$POD_NAME" \
     --arg image "$GPU_IMAGE" \
