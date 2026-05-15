@@ -79,7 +79,14 @@ set -a
 set +a
 : "${RUNPOD_API_KEY:?Set RUNPOD_API_KEY in .env}"
 
-GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
+# Use SHA-tagged image by default — guarantees RunPod hosts pull fresh content
+# (the `:latest` tag is reused across builds and RunPod caches it aggressively).
+GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || true)
+if [ -n "$GIT_SHA" ]; then
+  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:sha-${GIT_SHA}}"
+else
+  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
+fi
 
 # ── Tools ─────────────────────────────────────────────────────
 for t in docker curl jq openssl flock; do

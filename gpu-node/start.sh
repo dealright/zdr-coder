@@ -52,3 +52,4 @@ exec python3 -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 --port 8000 \
   --api-key "$VLLM_API_KEY" \
   "${EXTRA_ARGS[@]}"
+
