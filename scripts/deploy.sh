@@ -37,14 +37,15 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    # AWQ-INT4 quant ~20GB on disk, ~22GB loaded → fits A40 48GB with full 64K KV.
-    # Original Qwen3-Coder-32B-Instruct (BF16) is ~64GB and would OOM on A40.
-    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A40}"
+    # Qwen3-Coder-32B-AWQ ~20GB. RTX A5000 24GB fits weights but KV cache for
+    # 64K context exceeds available headroom — cap MAX_LEN at 16K.
+    # When A40/A6000 (48GB) is in stock, override GPU_TYPE_ID + MAX_LEN in .env.
+    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA RTX A5000}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
     MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct-AWQ}"
     TP_SIZE="${TP_SIZE:-1}"
-    MAX_LEN="${MAX_LEN:-65536}"
+    MAX_LEN="${MAX_LEN:-16384}"
     ;;
   sonnet)
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
