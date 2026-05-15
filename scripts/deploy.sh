@@ -37,13 +37,14 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    # Qwen3-Coder-32B-AWQ ~20GB. RTX A5000 24GB fits weights but KV cache for
-    # 64K context exceeds available headroom — cap MAX_LEN at 16K.
-    # When A40/A6000 (48GB) is in stock, override GPU_TYPE_ID + MAX_LEN in .env.
+    # Qwen2.5-Coder-32B-AWQ (~20GB INT4). RTX A5000 24GB fits weights + 16K KV.
+    # Qwen3-Coder series ships mainly as MoE; their official 32B-dense AWQ is on
+    # the 2.5 line. Override in .env if you want a different model.
+    # When A40/A6000 (48GB) is in stock, you can raise MAX_LEN to 64K+.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA RTX A5000}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
-    MODEL="${MODEL:-Qwen/Qwen3-Coder-32B-Instruct-AWQ}"
+    MODEL="${MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct-AWQ}"
     TP_SIZE="${TP_SIZE:-1}"
     MAX_LEN="${MAX_LEN:-16384}"
     ;;
