@@ -15,3 +15,5 @@ node_modules/
 .vscode/
 .vllm-key.*
 .env-runtime
+logs.txt
+*.log

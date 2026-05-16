@@ -37,16 +37,18 @@ fi
 # ── Per-profile defaults ──────────────────────────────────────
 case "$PROFILE" in
   haiku)
-    # Qwen2.5-Coder-32B-AWQ (~20GB INT4). RTX A5000 24GB fits weights + 16K KV.
-    # Qwen3-Coder series ships mainly as MoE; their official 32B-dense AWQ is on
-    # the 2.5 line. Override in .env if you want a different model.
-    # When A40/A6000 (48GB) is in stock, you can raise MAX_LEN to 64K+.
+    # Qwen2.5-Coder-32B-AWQ (~20GB INT4) on any 24GB card (A5000/L4/4090).
+    # Empirically: weights eat ~20 GiB, KV ~4 GiB at MAX_LEN=16384. At
+    # GPU_UTIL=0.95 + MAX_LEN=8192 the margin gets eaten by CUDA graph capture
+    # and vLLM crashloops. 4K leaves ~1.5 GiB headroom and starts reliably.
+    # When A40/A6000 (48GB) is in stock, raise MAX_LEN to 64K+.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA RTX A5000}"
     GPU_COUNT="${GPU_COUNT:-1}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-120}"
     MODEL="${MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct-AWQ}"
     TP_SIZE="${TP_SIZE:-1}"
-    MAX_LEN="${MAX_LEN:-16384}"
+    MAX_LEN="${MAX_LEN:-4096}"
+    GPU_UTIL="${GPU_UTIL:-0.95}"
     ;;
   sonnet)
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
@@ -144,6 +146,7 @@ if [ -z "$POD_ID" ]; then
     --arg model "$MODEL" \
     --arg tp "$TP_SIZE" \
     --arg maxLen "$MAX_LEN" \
+    --arg gpuUtil "${GPU_UTIL:-0.92}" \
     --arg hfTok "${HF_TOKEN:-}" \
     '{ input: {
       name: $name, imageName: $image, cloudType: "SECURE",
@@ -154,7 +157,8 @@ if [ -z "$POD_ID" ]; then
         {key: "VLLM_API_KEY", value: $vllmKey},
         {key: "MODEL",        value: $model},
         {key: "TP_SIZE",      value: $tp},
-        {key: "MAX_LEN",      value: $maxLen}
+        {key: "MAX_LEN",      value: $maxLen},
+        {key: "GPU_UTIL",     value: $gpuUtil}
       ] + ($hfTok | if . != "" then [{key: "HF_TOKEN", value: .}] else [] end))
     } }')
   R=$(gql 'mutation($input: PodFindAndDeployOnDemandInput) { podFindAndDeployOnDemand(input: $input) { id name } }' "$VARS")

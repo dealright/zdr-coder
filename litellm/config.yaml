@@ -2,36 +2,40 @@
 # Proxy URLs + per-profile bearer tokens are populated by scripts/deploy.sh into
 # .env-runtime, which docker-compose loads. Undeployed profiles return 502 (env
 # vars unset → unreachable target) — that's expected.
+#
+# The `model:` field must match what vLLM serves under (its HF id, since
+# start.sh doesn't pass --served-model-name). Keep these in sync with the
+# MODEL defaults in scripts/deploy.sh.
 
 model_list:
   - model_name: haiku
     litellm_params:
-      model: openai/inference
+      model: openai/Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
       api_base: os.environ/HAIKU_API_BASE
       api_key: os.environ/HAIKU_API_KEY
 
   - model_name: sonnet
     litellm_params:
-      model: openai/inference
+      model: openai/deepseek-ai/DeepSeek-V4-Flash
       api_base: os.environ/SONNET_API_BASE
       api_key: os.environ/SONNET_API_KEY
 
   - model_name: opus
     litellm_params:
-      model: openai/inference
+      model: openai/moonshotai/Kimi-K2.6-Instruct
       api_base: os.environ/OPUS_API_BASE
       api_key: os.environ/OPUS_API_KEY
 
   # Back-compat aliases: heavy/plan → sonnet
   - model_name: heavy
     litellm_params:
-      model: openai/inference
+      model: openai/deepseek-ai/DeepSeek-V4-Flash
       api_base: os.environ/SONNET_API_BASE
       api_key: os.environ/SONNET_API_KEY
 
   - model_name: plan
     litellm_params:
-      model: openai/inference
+      model: openai/deepseek-ai/DeepSeek-V4-Flash
       api_base: os.environ/SONNET_API_BASE
       api_key: os.environ/SONNET_API_KEY
 
