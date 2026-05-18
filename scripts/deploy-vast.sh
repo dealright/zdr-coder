@@ -147,7 +147,7 @@ if [ -z "$INSTANCE_ID" ]; then
       direct_port_count: {gte: 1},
       disk_space: {gte: $disk},
       inet_down: {gte: 500},
-      cuda_max_good: {gte: 12.0},
+      cuda_max_good: {gte: 12.6},
       type: "on-demand",
       order: [["dph_total", "asc"]],
       limit: 5
