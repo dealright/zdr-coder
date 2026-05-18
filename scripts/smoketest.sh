@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Smoke-test one profile end-to-end:
 #   Cline → LiteLLM (local) → HTTPS via RunPod proxy → vLLM (remote GPU)
-# Usage:  ./scripts/smoketest.sh [haiku|sonnet|opus]   (default: sonnet)
+# Usage:  ./scripts/smoketest.sh [haiku|sonnet|opus|haiku-serverless]   (default: sonnet)
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 PROFILE="${1:-sonnet}"
-case "$PROFILE" in haiku|sonnet|opus) ;; *)
-  echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet | opus" >&2; exit 1 ;;
+case "$PROFILE" in haiku|sonnet|opus|haiku-serverless) ;; *)
+  echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet | opus | haiku-serverless" >&2; exit 1 ;;
 esac
 
 [ -f .env ] || { echo "FAIL: .env missing." >&2; exit 1; }

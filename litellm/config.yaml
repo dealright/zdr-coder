@@ -14,6 +14,15 @@ model_list:
       api_base: os.environ/HAIKU_API_BASE
       api_key: os.environ/HAIKU_API_KEY
 
+  # Same model as `haiku` but served by RunPod Serverless instead of a pod —
+  # billed per-second, scales to zero when idle, cold-starts on first request.
+  # Provisioned by scripts/deploy-serverless.sh haiku.
+  - model_name: haiku-serverless
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
+      api_base: os.environ/HAIKU_SERVERLESS_API_BASE
+      api_key: os.environ/HAIKU_SERVERLESS_API_KEY
+
   - model_name: sonnet
     litellm_params:
       model: openai/deepseek-ai/DeepSeek-V4-Flash
