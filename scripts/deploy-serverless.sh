@@ -158,11 +158,13 @@ echo "═ 4/5 [$ROUTE]  Writing .env-runtime entry"
 {
   flock -x 200
   touch .env-runtime
-  grep -v "^${ROUTE_UPPER}_API_" .env-runtime > .env-runtime.tmp || true
+  grep -vE "^(${ROUTE_UPPER}_API_|LITELLM_MASTER_KEY=)" .env-runtime > .env-runtime.tmp || true
   # Inference path auth uses the account-level RUNPOD_API_KEY (must be "All"
   # or "Read/Write" scope — "Restricted" works for pod management but returns
-  # 403 against /v2/<id>/openai/v1).
+  # 403 against /v2/<id>/openai/v1). Master key lives in .env-runtime so
+  # docker-compose recreates always pick it up.
   cat >> .env-runtime.tmp <<EOF
+LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 ${ROUTE_UPPER}_API_BASE=${API_BASE}
 ${ROUTE_UPPER}_API_KEY=${RUNPOD_API_KEY}
 EOF

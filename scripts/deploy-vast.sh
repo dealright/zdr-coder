@@ -280,8 +280,14 @@ echo "═ 4/6 [$ROUTE]  Writing .env-runtime entry"
 {
   flock -x 200
   touch .env-runtime
-  grep -v "^${ROUTE_UPPER}_API_" .env-runtime > .env-runtime.tmp || true
+  # Strip this profile's existing entries + the master-key line, then
+  # rewrite all of them. The master key MUST be in .env-runtime so that
+  # docker-compose's env_file picks it up on every recreate — otherwise
+  # any caller (destroy.sh, parallel deploys) that forgets to export it
+  # would create a broken LiteLLM with no auth.
+  grep -vE "^(${ROUTE_UPPER}_API_|LITELLM_MASTER_KEY=)" .env-runtime > .env-runtime.tmp || true
   cat >> .env-runtime.tmp <<EOF
+LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 ${ROUTE_UPPER}_API_BASE=${API_BASE}
 ${ROUTE_UPPER}_API_KEY=${VLLM_API_KEY}
 EOF

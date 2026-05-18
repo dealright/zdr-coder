@@ -9,10 +9,12 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
+    # Both per-profile API_BASE/_KEY vars AND LITELLM_MASTER_KEY come from
+    # .env-runtime, written by the deploy scripts. This makes container
+    # recreates (force-recreate after add/remove profile) self-sufficient —
+    # no need to remember `export LITELLM_MASTER_KEY` in every caller.
     env_file:
       - .env-runtime
-    environment:
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command:

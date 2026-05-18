@@ -201,9 +201,12 @@ echo "═ 4/6 [$PROFILE]  Writing .env-runtime entry"
 {
   flock -x 200
   # Preserve any existing per-profile entries, overwrite this profile's only.
+  # Master key must live in .env-runtime so docker-compose env_file picks it
+  # up on every recreate — independent of whether the caller exported it.
   touch .env-runtime
-  grep -v "^${PROFILE_UPPER}_API_" .env-runtime > .env-runtime.tmp || true
+  grep -vE "^(${PROFILE_UPPER}_API_|LITELLM_MASTER_KEY=)" .env-runtime > .env-runtime.tmp || true
   cat >> .env-runtime.tmp <<EOF
+LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 ${PROFILE_UPPER}_API_BASE=${API_BASE}
 ${PROFILE_UPPER}_API_KEY=${VLLM_API_KEY}
 EOF
