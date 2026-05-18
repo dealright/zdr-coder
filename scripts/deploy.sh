@@ -89,14 +89,11 @@ set -a
 set +a
 : "${RUNPOD_API_KEY:?Set RUNPOD_API_KEY in .env}"
 
-# Use SHA-tagged image by default — guarantees RunPod hosts pull fresh content
-# (the `:latest` tag is reused across builds and RunPod caches it aggressively).
-GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || true)
-if [ -n "$GIT_SHA" ]; then
-  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:sha-${GIT_SHA}}"
-else
-  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
-fi
+# Default to :latest — the build workflow pushes :latest on every main-branch
+# build, so this always points at the newest fix without anyone needing to
+# bump a SHA. Override with GPU_IMAGE=ghcr.io/.../zdr-coder-gpu:sha-XXXXX
+# if you want a specific reproducible build (e.g. for production pinning).
+GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
 
 # ── Tools ─────────────────────────────────────────────────────
 for t in docker curl jq openssl flock; do

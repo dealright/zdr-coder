@@ -46,13 +46,10 @@ vast() {
   fi
 }
 
-# ── Image tag (SHA-pinned, falls back to :latest) ────────────
-GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || true)
-if [ -n "$GIT_SHA" ]; then
-  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:sha-${GIT_SHA}}"
-else
-  GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
-fi
+# ── Image tag ─────────────────────────────────────────────────
+# Default to :latest — build workflow pushes it on every main-branch build.
+# Override with GPU_IMAGE=...sha-XXXXX for reproducible production pins.
+GPU_IMAGE="${GPU_IMAGE:-ghcr.io/dealright/zdr-coder-gpu:latest}"
 
 # ── Per-profile defaults (same surface as deploy.sh) ────────
 case "$PROFILE" in
