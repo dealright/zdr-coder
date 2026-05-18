@@ -10,11 +10,13 @@
 
 Pick a profile (haiku / sonnet / opus). Pick a compute mode (always-on **pod** for predictable latency, or **serverless** for pay-per-second with scale-to-zero).
 
-| Profile | Closest Claude | Open-source model | GPU shape | Pod $/hr | Pod $/mo @ 80h |
-|---|---|---|---|---|---|
-| **haiku** | Haiku 4.5 | Qwen2.5-Coder-32B-AWQ | 1× 24 GB (A5000/L4/4090) | ~$0.27–0.41 | ~$22–33 |
-| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 2× A100 SXM 80GB | ~$2.98 | $238 |
-| **opus** | Opus 4.7 | Kimi K2.6 | 8× H100 SXM 80GB | ~$23.92 | $1,914 |
+| Profile | Closest Claude | Open-source model | Weights | GPU shape | Pod $/hr | Pod $/mo @ 80h |
+|---|---|---|---|---|---|---|
+| **haiku** | Haiku 4.5 | Qwen2.5-Coder-32B-AWQ | 18 GiB INT4 | 1× 24 GB (A5000/L4/4090) | ~$0.27–0.41 | ~$22–33 |
+| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 149 GiB FP8 | 4× A100-SXM4 80GB | ~$5.96 | $477 |
+| **opus** | Opus 4.7 | Kimi K2.6 | 554 GiB mixed | 8× H100-SXM 80GB | ~$23.92 | $1,914 |
+
+GPU shapes are sized to fit each model's weights plus headroom for a useful KV-cache context window. Tune via env: `GPU_TYPE_ID`, `GPU_COUNT`, `TP_SIZE`, `MAX_LEN`.
 
 Run any one, or all three in parallel against the same LiteLLM endpoint and switch between them in Cline by changing the Model ID. Serverless is available for `haiku` today (`haiku-serverless`); sonnet/opus serverless support is on the roadmap.
 
@@ -31,7 +33,7 @@ flowchart LR
     subgraph rp["RunPod"]
         Proxy["proxy.runpod.net<br/>(TLS termination)"]
         Proxy --> GPUH["haiku pod<br/>1× 24GB<br/>Qwen2.5-Coder-32B-AWQ"]
-        Proxy --> GPUS["sonnet pod<br/>2× A100 80GB<br/>DeepSeek V4 Flash"]
+        Proxy --> GPUS["sonnet pod<br/>4× A100 80GB<br/>DeepSeek V4 Flash"]
         Proxy --> GPUO["opus pod<br/>8× H100 80GB<br/>Kimi K2.6"]
         Proxy --> SLS["haiku-serverless<br/>worker-v1-vllm<br/>24/32/48GB pool"]
     end
@@ -159,7 +161,7 @@ If you code 6+ hrs/day on the same tier: pods. If you code 1–2 hrs/day or inte
 - **24 GB GPU supply is tight.** Haiku targets a 24 GB card (A5000 / L4 / 4090) — RunPod's secure-cloud supply has been spotty during testing. `deploy.sh haiku` lets you override `GPU_TYPE_ID`; the serverless variant uses a multi-pool list (24/32/48 GB) and picks whichever has capacity.
 - **No persistent vLLM cache by default.** Weights re-download on every fresh pod. RunPod supports persistent volumes if you want to keep them.
 - **Hugging Face anonymous access.** Models like Qwen2.5-Coder-32B-AWQ and DeepSeek V4 Flash work without a token. Gated models need `HF_TOKEN` in `.env`.
-- **Parallel mode billing.** All three pod profiles running = ~$27/hr. Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
+- **Parallel mode billing.** All three pod profiles running ≈ ~$30/hr (haiku $0.41 + sonnet $5.96 + opus $23.92). Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
 
 ## Files
 

@@ -51,20 +51,26 @@ case "$PROFILE" in
     GPU_UTIL="${GPU_UTIL:-0.95}"
     ;;
   sonnet)
+    # DeepSeek V4 Flash (FP8): 158B params, ~148.7 GiB weights. 2x80GB is too
+    # tight — barely fits weights, no KV room. 4x80GB → ~171 GiB free for KV,
+    # comfortable 64K context. MoE: TP=4 splits experts cleanly.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
-    GPU_COUNT="${GPU_COUNT:-2}"
+    GPU_COUNT="${GPU_COUNT:-4}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-400}"
     MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
-    TP_SIZE="${TP_SIZE:-2}"
-    MAX_LEN="${MAX_LEN:-262144}"
+    TP_SIZE="${TP_SIZE:-4}"
+    MAX_LEN="${MAX_LEN:-65536}"
     ;;
   opus)
+    # Kimi K2.6: 1.06T params, ~554 GiB mixed-precision weights. 8x80GB =
+    # 640 GiB total → ~86 GiB free for KV. 131K context risks OOM on this
+    # head room with a 1T-param model; 64K is the conservative pick.
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA H100 80GB HBM3}"
     GPU_COUNT="${GPU_COUNT:-8}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-700}"
     MODEL="${MODEL:-moonshotai/Kimi-K2.6}"
     TP_SIZE="${TP_SIZE:-8}"
-    MAX_LEN="${MAX_LEN:-131072}"
+    MAX_LEN="${MAX_LEN:-65536}"
     ;;
   *)
     echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet | opus | all" >&2
