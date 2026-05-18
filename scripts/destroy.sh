@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tear down one profile or all.
-# Usage: ./scripts/destroy.sh [haiku|sonnet|opus|haiku-serverless|all]
+# Usage: ./scripts/destroy.sh [haiku|sonnet|opus|haiku-serverless|haiku-vast|sonnet-vast|opus-vast|all]
 # Default: all.
 
 set -uo pipefail
@@ -10,6 +10,7 @@ PROFILE="${1:-all}"
 
 [ -f .env ] && { set -a; . ./.env; set +a; }
 RUNPOD_API="https://api.runpod.io/graphql"
+VAST_API="https://console.vast.ai/api/v0"
 
 gql() {
   curl -sS -X POST "$RUNPOD_API" \
@@ -70,12 +71,38 @@ terminate_serverless() {
   fi
 }
 
+terminate_vast() {
+  local route="$1"
+  local state=".runpod-state.${route}"
+  local route_upper
+  route_upper=$(echo "$route" | tr '[:lower:]-' '[:upper:]_')
+
+  if [ -f "$state" ] && [ -n "${VAST_API_KEY:-}" ]; then
+    local instance_id
+    instance_id=$(grep '^INSTANCE_ID=' "$state" | cut -d= -f2)
+    if [ -n "${instance_id:-}" ]; then
+      echo "→ Deleting $route Vast instance $instance_id..."
+      curl -sS -X DELETE "${VAST_API}/instances/${instance_id}/" \
+        -H "Authorization: Bearer $VAST_API_KEY" >/dev/null
+      echo "  ✓ Instance deleted"
+    fi
+    rm -f "$state"
+  fi
+  if [ -f .env-runtime ]; then
+    grep -v "^${route_upper}_API_" .env-runtime > .env-runtime.tmp || true
+    mv .env-runtime.tmp .env-runtime
+  fi
+}
+
 case "$PROFILE" in
   all)
     terminate_pod haiku
     terminate_pod sonnet
     terminate_pod opus
     terminate_serverless haiku-serverless
+    terminate_vast haiku-vast
+    terminate_vast sonnet-vast
+    terminate_vast opus-vast
     docker compose down
     echo "  ✓ Local LiteLLM stopped"
     ;;
@@ -99,8 +126,18 @@ case "$PROFILE" in
       echo "  ✓ No profiles left — LiteLLM stopped"
     fi
     ;;
+  haiku-vast|sonnet-vast|opus-vast)
+    terminate_vast "$PROFILE"
+    if [ -f .env-runtime ] && [ -s .env-runtime ]; then
+      docker compose up -d --force-recreate litellm >/dev/null 2>&1 || true
+      echo "  ✓ LiteLLM reloaded with remaining profiles"
+    else
+      docker compose down
+      echo "  ✓ No profiles left — LiteLLM stopped"
+    fi
+    ;;
   *)
-    echo "Usage: $0 [all|haiku|sonnet|opus|haiku-serverless]" >&2
+    echo "Usage: $0 [all|haiku|sonnet|opus|haiku-serverless|haiku-vast|sonnet-vast|opus-vast]" >&2
     exit 1
     ;;
 esac

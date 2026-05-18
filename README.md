@@ -142,6 +142,41 @@ To swap between models mid-session: change the **Model ID** field. No restart, n
 
 If you code 6+ hrs/day on the same tier: pods. If you code 1–2 hrs/day or intermittently: serverless.
 
+## Alternative provider: Vast.ai
+
+RunPod's secure-cloud capacity for 24 GB cards (haiku) and 80 GB datacenter cards (sonnet/opus) is often constrained. [Vast.ai](https://vast.ai/) is a marketplace of independent hosts running the same datacenter + consumer GPUs at significantly lower prices, with per-second billing and no commitment. Verified offers (datacenter-grade hosts) are filterable via the API.
+
+Live pricing snapshot (May 2026, verified on-demand offers, lowest available `$/hr`):
+
+| Tier | Shape | RunPod $/hr | Vast.ai $/hr | Savings |
+|---|---|---|---|---|
+| haiku | 1× RTX 4090 24GB | $0.69 | **$0.20** | ~70% |
+| sonnet | 4× A100-SXM4 80GB | $5.96 | **$2.14** | ~64% |
+| opus | 8× H100 SXM 80GB | $23.92 (often sold out) | **$11.75** | ~51% |
+| opus *(alt)* | 4× H200 140GB | — | **$10.33** | even better (560 GB > Kimi K2.6's 554 GB) |
+
+Same one-line interface, separate script:
+
+```bash
+cp .env.example .env
+$EDITOR .env             # set VAST_API_KEY from https://cloud.vast.ai/account/
+
+./scripts/deploy-vast.sh haiku      # 1× RTX 4090
+./scripts/deploy-vast.sh sonnet     # 4× A100-80GB on one host
+./scripts/deploy-vast.sh opus       # 8× H100-80GB on one host
+```
+
+Model IDs in Cline become `haiku-vast` / `sonnet-vast` / `opus-vast`. Mix providers freely — RunPod pod for haiku, Vast for sonnet, anything you want.
+
+Teardown:
+
+```bash
+./scripts/destroy.sh sonnet-vast    # one tier
+./scripts/destroy.sh all            # everything across both providers
+```
+
+**Vast caveat — plain HTTP.** Vast's direct-port-forwarding gives you `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. That's identical to the security envelope of the original WireGuard design and adequate for personal coding use, but if you need full TLS termination, run Caddy/Cloudflared as a sidecar inside the same container group. Filed as a future improvement.
+
 ## How `zdr-coder` compares to similar projects
 
 | Project | Closeness | Differs |

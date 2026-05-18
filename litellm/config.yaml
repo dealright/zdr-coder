@@ -23,6 +23,29 @@ model_list:
       api_base: os.environ/HAIKU_SERVERLESS_API_BASE
       api_key: os.environ/HAIKU_SERVERLESS_API_KEY
 
+  # Same models as haiku/sonnet/opus but served on Vast.ai (marketplace of
+  # datacenter + consumer GPUs). Significantly cheaper than RunPod across all
+  # tiers and far more on-demand capacity. Provisioned by deploy-vast.sh.
+  # NOTE: Vast direct-port-forwarding is plain HTTP; the bearer token is the
+  # only thing keeping the endpoint private. See README "Caveats".
+  - model_name: haiku-vast
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
+      api_base: os.environ/HAIKU_VAST_API_BASE
+      api_key: os.environ/HAIKU_VAST_API_KEY
+
+  - model_name: sonnet-vast
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-V4-Flash
+      api_base: os.environ/SONNET_VAST_API_BASE
+      api_key: os.environ/SONNET_VAST_API_KEY
+
+  - model_name: opus-vast
+    litellm_params:
+      model: openai/moonshotai/Kimi-K2.6
+      api_base: os.environ/OPUS_VAST_API_BASE
+      api_key: os.environ/OPUS_VAST_API_KEY
+
   - model_name: sonnet
     litellm_params:
       model: openai/deepseek-ai/DeepSeek-V4-Flash
