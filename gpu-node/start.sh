@@ -42,6 +42,19 @@ case "${MODEL,,}" in
     ;;
 esac
 
+# Model-specific kv-cache dtype requirements.
+# DeepSeek V4 ships in FP8 and vLLM (v0.21+) asserts the KV cache also be
+# FP8 — it refuses to start with the default 'auto'. Other FP8-native MoEs
+# may follow the same pattern; add them here as they're tested.
+case "${MODEL,,}" in
+  *deepseek-v4*)
+    KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
+    ;;
+esac
+if [ -n "${KV_CACHE_DTYPE:-}" ]; then
+  EXTRA_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
+fi
+
 # CPU offload (lets you run a model with weights larger than your VRAM by
 # parking inactive layers in system RAM). Set OFFLOAD_GB=240 to offload
 # 240 GiB to CPU; combine with --enforce-eager to free up CUDA-graph VRAM.
