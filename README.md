@@ -4,17 +4,19 @@
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](#what-zdr-means-here)
 [![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20RunPod%20BAA-purple.svg)](https://www.runpod.io/press/runpod-meets-hipaa-and-gdpr-standards)
 
-**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** One-line deploy. Cline talks to your own open-source model on rented GPUs over a private WireGuard tunnel. No third-party model provider, no Tailscale cloud, no Cloudflare, no Hugging Face token — just RunPod for the GPU.
+**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** One-line deploy. Cline talks to an open-source model on rented GPUs via RunPod's HTTPS proxy with per-pod bearer auth. No third-party model provider — just RunPod for the GPU.
 
-## Three profiles, one command to switch
+## Three profiles, two compute modes
 
-| Profile | Closest Claude | Open-source model | GPU shape | $/hr | $/mo @ 80 h |
+Pick a profile (haiku / sonnet / opus). Pick a compute mode (always-on **pod** for predictable latency, or **serverless** for pay-per-second with scale-to-zero).
+
+| Profile | Closest Claude | Open-source model | GPU shape | Pod $/hr | Pod $/mo @ 80h |
 |---|---|---|---|---|---|
-| **haiku** | Haiku 4.5 | Qwen3-Coder-32B | 1× RTX A5000 24GB | **$0.27** | $22 |
-| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 2× A100 SXM 80GB | **$2.98** | $238 |
-| **opus** | Opus 4.7 | Kimi K2.6 INT4 | 8× H100 SXM | **$23.92** | $1,914 |
+| **haiku** | Haiku 4.5 | Qwen2.5-Coder-32B-AWQ | 1× 24 GB (A5000/L4/4090) | ~$0.27–0.41 | ~$22–33 |
+| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 2× A100 SXM 80GB | ~$2.98 | $238 |
+| **opus** | Opus 4.7 | Kimi K2.6 | 8× H100 SXM 80GB | ~$23.92 | $1,914 |
 
-Run any one, or all three in parallel against the same LiteLLM endpoint and switch between them in Cline by changing the Model ID.
+Run any one, or all three in parallel against the same LiteLLM endpoint and switch between them in Cline by changing the Model ID. Serverless is available for `haiku` today (`haiku-serverless`); sonnet/opus serverless support is on the roadmap.
 
 ## Architecture
 
@@ -23,28 +25,28 @@ flowchart LR
     subgraph laptop["Your laptop"]
         Cline["VSCodium + Cline"]
         LiteLLM["LiteLLM proxy<br/>Docker, :4000"]
-        WG["WireGuard container<br/>(one interface per profile)"]
         Cline -->|"localhost:4000"| LiteLLM
-        LiteLLM -.-> WG
     end
-    WG -.->|"UDP/51820 — E2E encrypted"| GPUH
-    WG -.->|"UDP/51820 — E2E encrypted"| GPUS
-    WG -.->|"UDP/51820 — E2E encrypted"| GPUO
-    subgraph rp["RunPod Secure pods"]
-        GPUH["haiku pod<br/>1× RTX A5000<br/>Qwen3-Coder-32B"]
-        GPUS["sonnet pod<br/>2× A100 80GB<br/>DeepSeek V4 Flash"]
-        GPUO["opus pod<br/>8× H100 80GB<br/>Kimi K2.6"]
+    LiteLLM -.->|"HTTPS + bearer<br/>per-profile token"| Proxy
+    subgraph rp["RunPod"]
+        Proxy["proxy.runpod.net<br/>(TLS termination)"]
+        Proxy --> GPUH["haiku pod<br/>1× 24GB<br/>Qwen2.5-Coder-32B-AWQ"]
+        Proxy --> GPUS["sonnet pod<br/>2× A100 80GB<br/>DeepSeek V4 Flash"]
+        Proxy --> GPUO["opus pod<br/>8× H100 80GB<br/>Kimi K2.6"]
+        Proxy --> SLS["haiku-serverless<br/>worker-v1-vllm<br/>24/32/48GB pool"]
     end
 ```
 
-- **WireGuard** = direct peer-to-peer E2E-encrypted UDP. One interface per profile (each on its own /24 subnet). No control plane, no Tailscale cloud, no Headscale, no Cloudflare. Just public-key exchange between two endpoints.
 - **LiteLLM** = local OpenAI-compatible proxy. Routes per-profile aliases, holds master API key.
-- **vLLM** = OpenAI-compatible model server. Downloads weights from HF-Mirror (no token) by default.
+- **RunPod HTTPS proxy** = `https://<pod-id>-8000.proxy.runpod.net`, TLS-terminated by RunPod, authed via a per-profile bearer token that LiteLLM injects.
+- **vLLM** (pods) / **runpod/worker-v1-vllm** (serverless) = OpenAI-compatible model server. Both serve `/v1/chat/completions`.
 - **Cline** = the agentic coding extension in VSCodium. Talks to LiteLLM on localhost.
+
+There is no mesh VPN. The earlier WireGuard-based design was dropped in favor of RunPod's managed HTTPS proxy + bearer tokens — same E2E security envelope (TLS to RunPod, bearer to vLLM), simpler to operate.
 
 ## What ZDR means here
 
-There is no managed model provider in the path. The WireGuard tunnel is E2E encrypted between exactly two endpoints (your laptop and your GPU pod). LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Nothing about your prompts touches a third party.
+There is no managed model provider in the path. The transport from your laptop to the GPU pod is TLS to RunPod's edge, then over RunPod's internal network to the pod. LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Prompts never touch a third party.
 
 For HIPAA: RunPod offers BAA-eligible Secure Cloud — email `support@runpod.io` to execute (1–2 business day turnaround, no Enterprise contract required).
 
@@ -56,7 +58,7 @@ Three steps.
 
 https://console.runpod.io/user/settings → **API Keys** → **Create API Key**.
 
-Permissions: **Read/Write on `api.runpod.io/graphql`**. No access needed to `api.runpod.ai` (that's their own hosted-inference API, not used here).
+Permissions: pick **All** (full read/write to `api.runpod.io/graphql` *and* `api.runpod.ai`). The "Restricted" scope works for the pod path but returns 403 against the serverless `/openai/v1` inference endpoint — pick **All** if you want both paths to work.
 
 Add credits to your RunPod account.
 
@@ -72,7 +74,7 @@ Add credits to your RunPod account.
 .\scripts\install-prereqs.ps1
 ```
 
-This installs Docker, wireguard-tools, jq, openssl, flock, VSCodium, and the Cline extension. macOS uses Homebrew, Ubuntu/Debian uses apt, Windows uses Chocolatey. Skips anything already installed.
+Installs Docker, jq, openssl, flock, VSCodium, and the Cline extension. macOS uses Homebrew, Ubuntu/Debian uses apt, Windows uses Chocolatey. Skips anything already installed.
 
 > **Windows note:** the deploy/destroy/smoketest scripts are bash. Run them via WSL2 (recommended — Docker Desktop on Windows uses WSL2 anyway) or Git Bash.
 
@@ -82,17 +84,18 @@ This installs Docker, wireguard-tools, jq, openssl, flock, VSCodium, and the Cli
 cp .env.example .env
 $EDITOR .env             # set RUNPOD_API_KEY (only required value)
 
-./scripts/deploy.sh sonnet     # default profile (~$2.98/hr, ~Sonnet 4.6 quality)
+./scripts/deploy.sh sonnet     # default profile, ~Sonnet 4.6 quality
 ```
 
 Or pick a different tier:
 
 ```bash
-./scripts/deploy.sh haiku      # ~$0.27/hr, ~Haiku 4.5 quality
-./scripts/deploy.sh opus       # ~$23.92/hr, ~Opus 4.7 quality
+./scripts/deploy.sh haiku                # always-on pod, ~Haiku 4.5 quality
+./scripts/deploy-serverless.sh haiku     # scale-to-zero serverless variant
+./scripts/deploy.sh opus                 # always-on pod, ~Opus 4.7 quality
 ```
 
-Or run all three at once (parallel cold start, ~20 min wall time vs 60 min serial):
+Run multiple in parallel (parallel cold start, ~20 min wall time vs serial):
 
 ```bash
 ./scripts/deploy.sh all
@@ -102,16 +105,17 @@ Or run all three at once (parallel cold start, ~20 min wall time vs 60 min seria
 ./scripts/deploy.sh opus
 ```
 
-Each deploy provisions its own RunPod pod, generates its own WireGuard keypair, allocates its own /24 subnet, and exposes a separate model alias in LiteLLM. They share one local LiteLLM endpoint on `http://localhost:4000` — you switch between profiles in Cline by changing the **Model ID** field (`haiku`/`sonnet`/`opus`).
+Each deploy provisions its own pod or serverless endpoint, generates its own bearer token, and exposes a separate model alias in LiteLLM. They share one local LiteLLM endpoint on `http://localhost:4000` — switch between profiles in Cline by changing the **Model ID** field (`haiku` / `haiku-serverless` / `sonnet` / `opus`).
 
 When you're done coding:
 
 ```bash
-./scripts/destroy.sh           # tears down all profiles
-./scripts/destroy.sh sonnet    # or just one profile
+./scripts/destroy.sh                     # tears down everything
+./scripts/destroy.sh sonnet              # one pod
+./scripts/destroy.sh haiku-serverless    # one serverless endpoint
 ```
 
-Pod termination stops RunPod billing within ~1 minute.
+Pod termination stops RunPod billing within ~1 minute. Serverless `workersMin=0` means idle cost is already $0; teardown deletes the endpoint + template.
 
 ### 4. Point Cline at it
 
@@ -120,29 +124,42 @@ The deploy script prints these — paste into VSCodium → Cline → gear:
 - **API Provider**: OpenAI Compatible
 - **Base URL**: `http://localhost:4000/v1`
 - **API Key**: contents of `.litellm-key` (auto-generated on first deploy)
-- **Model ID**: `sonnet` (or `haiku` / `opus`)
+- **Model ID**: `sonnet` (or `haiku` / `haiku-serverless` / `opus`)
 
 To swap between models mid-session: change the **Model ID** field. No restart, no redeploy.
+
+## Pod vs Serverless — when each wins
+
+| | **Pod** | **Serverless** |
+|---|---|---|
+| Idle cost | $0.27–$23.92/hr always-on | $0/hr (scales to 0) |
+| Active cost | included | per-second worker billing |
+| Cold start | ~15 min once (model cache survives container restarts on the same pod) | ~3–5 min on first request after idle (vLLM lazy-inits) |
+| Capacity risk | Subject to GPU supply per pool/region | Multi-region worker pool, more elastic |
+| Best for | Continuous use, low latency requirements | Bursty/intermittent use, idle hours don't matter |
+
+If you code 6+ hrs/day on the same tier: pods. If you code 1–2 hrs/day or intermittently: serverless.
 
 ## How `zdr-coder` compares to similar projects
 
 | Project | Closeness | Differs |
 |---|---|---|
-| [Leafcloud `tf-leafcloud-opencode`](https://docs.leaf.cloud/en/latest/private-llm/team-opencode-vllm/) | ~70% | OpenCode TUI (not Cline), CIDR allowlist (not WG), Leafcloud-only, no BAA |
-| OpenClaw + vLLM on Vast.ai / Salad | ~65% | OpenClaw runtime, no LiteLLM Anthropic shim, no mesh networking |
+| [Leafcloud `tf-leafcloud-opencode`](https://docs.leaf.cloud/en/latest/private-llm/team-opencode-vllm/) | ~70% | OpenCode TUI (not Cline), CIDR allowlist, Leafcloud-only, no BAA |
+| OpenClaw + vLLM on Vast.ai / Salad | ~65% | OpenClaw runtime, no LiteLLM Anthropic shim |
 | [Netclode](https://github.com/angristan/netclode) | ~55% | Mobile/iOS client, Ollama not vLLM, k3s + microVM-per-session |
-| ZeroClaw + LiteLLM + vLLM in Docker | ~50% | DGX Spark focus, no WG, ZeroClaw not Cline |
+| ZeroClaw + LiteLLM + vLLM in Docker | ~50% | DGX Spark focus, ZeroClaw not Cline |
 | BentoVLLM / OpenLLM | ~50% | Just the "model → OpenAI endpoint" piece |
 
-**The differentiation**: nobody else ships specifically *VSCodium + Cline + LiteLLM + pure WireGuard (no control plane) + rented-GPU template + HIPAA-eligible host*. Position is compliance-grade Claude Code in 30 minutes on rented GPUs with peer-to-peer mesh.
+**The differentiation**: nobody else ships VSCodium + Cline + LiteLLM + rented-GPU vLLM + a *serverless mode option* + HIPAA-eligible host as a single one-line-deploy template.
 
 ## Caveats
 
 - **RunPod BAA is a separate process.** Email `support@runpod.io` if you need it — 1–2 business days, no Enterprise commitment.
-- **Cold start is slow.** ~10–20 min for haiku/sonnet; ~20–30 min for opus (Kimi K2.6 weights are large). Run profiles in parallel to overlap warmups.
+- **Cold start is slow.** Pods: ~10–20 min for haiku/sonnet; ~20–30 min for opus (Kimi K2.6 weights are large). Serverless: ~3–5 min on first request after scale-to-zero. Run profiles in parallel to overlap warmups.
+- **24 GB GPU supply is tight.** Haiku targets a 24 GB card (A5000 / L4 / 4090) — RunPod's secure-cloud supply has been spotty during testing. `deploy.sh haiku` lets you override `GPU_TYPE_ID`; the serverless variant uses a multi-pool list (24/32/48 GB) and picks whichever has capacity.
 - **No persistent vLLM cache by default.** Weights re-download on every fresh pod. RunPod supports persistent volumes if you want to keep them.
-- **HF-Mirror is community-run.** Reliable for most public models. If a model isn't mirrored, set `HF_TOKEN` in `.env` to fall back to the original HF (some models still need license acceptance there).
-- **Parallel mode billing.** All three profiles running = ~$27/hr. Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
+- **Hugging Face anonymous access.** Models like Qwen2.5-Coder-32B-AWQ and DeepSeek V4 Flash work without a token. Gated models need `HF_TOKEN` in `.env`.
+- **Parallel mode billing.** All three pod profiles running = ~$27/hr. Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
 
 ## Files
 
@@ -150,19 +167,19 @@ To swap between models mid-session: change the **Model ID** field. No restart, n
 .
 ├── README.md
 ├── LICENSE                       # MIT
-├── docker-compose.yml            # WireGuard peer (multi-interface) + LiteLLM
-├── litellm/config.yaml           # model routes (haiku/sonnet/opus + heavy/plan)
+├── docker-compose.yml            # LiteLLM container only
+├── litellm/config.yaml           # model routes (haiku/sonnet/opus + serverless + heavy/plan)
 ├── gpu-node/
-│   ├── Dockerfile                # vLLM + wireguard-tools image
+│   ├── Dockerfile                # vLLM image
 │   └── start.sh                  # container entrypoint
 ├── scripts/
 │   ├── install-prereqs.sh        # macOS/Linux installer (Homebrew/apt)
 │   ├── install-prereqs.ps1       # Windows installer (Chocolatey, PowerShell)
-│   ├── deploy.sh                 # one-line deploy (per profile or all)
-│   ├── destroy.sh                # one-line teardown (per profile or all)
+│   ├── deploy.sh                 # one-line pod deploy (per profile or all)
+│   ├── deploy-serverless.sh      # one-line serverless deploy (haiku today)
+│   ├── destroy.sh                # one-line teardown (per profile, including serverless)
 │   ├── preflight.sh              # validates prereqs + .env
 │   └── smoketest.sh              # end-to-end path test (per profile)
-├── wg/                           # generated WG configs (gitignored)
 ├── .github/workflows/            # auto-builds GPU image to GHCR
 ├── .env.example                  # 1 required value
 └── .gitignore
@@ -172,15 +189,15 @@ To swap between models mid-session: change the **Model ID** field. No restart, n
 
 **`smoketest.sh` returns FAIL** — read its output; it names the broken hop.
 
-**WireGuard handshake doesn't happen** — `docker compose exec wg-laptop wg show <profile>` should show the peer with `latest handshake` once it's working. If empty, the GPU pod's UDP port may not be exposed. Check the RunPod console for port mappings on the pod.
+**`403 Forbidden` from `/v2/<id>/openai/v1`** — your `RUNPOD_API_KEY` is "Restricted" scope. Serverless inference needs "All" or "Read/Write". Create a new key in the RunPod console with full scope and update `.env`.
 
-**vLLM "out of memory"** — shrink `MAX_LEN` or lower `--gpu-memory-utilization` to `0.88` in `gpu-node/start.sh`.
+**Serverless worker stuck "initializing" with no logs** — your template image tag doesn't exist. `runpod/worker-v1-vllm` only ships versioned tags (`:v2.18.1` etc.) — there is no `:stable` or `:latest`. Update the template.
 
-**Model download fails from HF-Mirror** — set `HF_TOKEN=hf_...` in `.env` to fall back to the original HuggingFace.
+**vLLM "out of memory"** — shrink `MAX_LEN` for the profile, or lower `GPU_UTIL`. Haiku at MAX_LEN=8K already exhausts KV cache margin on 24 GB after CUDA-graph capture overhead; the default is 4K for that reason.
 
-**`wg` not found** — `./scripts/install-prereqs.sh` should have installed it. If you skipped that, run it.
+**Serverless worker dies with `CUDA initialization failed: out of memory` during fitness check** — host-level GPU has stale allocations from a prior worker. RunPod usually re-schedules; if it loops, exclude the specific GPU pool (e.g. drop `AMPERE_24` from `gpuIds` to skip A5000/3090 hosts) and the next worker will land elsewhere.
 
-**Wrong RunPod permissions** — the API key needs **Read/Write on `api.runpod.io/graphql`**. The `api.runpod.ai` permission is for their hosted inference, not used here.
+**Cold-start request hits Cloudflare 524** — the sync `/openai/v1` path has a ~600s edge timeout. The worker is fine; subsequent requests will succeed once it finishes warming. Or use the async `/run` + `/status` API for very long warmups.
 
 ## Reporting vulnerabilities
 

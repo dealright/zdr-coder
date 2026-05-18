@@ -62,7 +62,7 @@ case "$PROFILE" in
     GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA H100 80GB HBM3}"
     GPU_COUNT="${GPU_COUNT:-8}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-700}"
-    MODEL="${MODEL:-moonshotai/Kimi-K2.6-Instruct}"
+    MODEL="${MODEL:-moonshotai/Kimi-K2.6}"
     TP_SIZE="${TP_SIZE:-8}"
     MAX_LEN="${MAX_LEN:-131072}"
     ;;

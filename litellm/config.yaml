@@ -31,7 +31,7 @@ model_list:
 
   - model_name: opus
     litellm_params:
-      model: openai/moonshotai/Kimi-K2.6-Instruct
+      model: openai/moonshotai/Kimi-K2.6
       api_base: os.environ/OPUS_API_BASE
       api_key: os.environ/OPUS_API_KEY
 
