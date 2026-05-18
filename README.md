@@ -2,23 +2,54 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](#what-zdr-means-here)
-[![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20RunPod%20BAA-purple.svg)](https://www.runpod.io/press/runpod-meets-hipaa-and-gdpr-standards)
+[![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20provider%20BAA-purple.svg)](#what-zdr-means-here)
 
-**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** One-line deploy. Cline talks to an open-source model on rented GPUs via RunPod's HTTPS proxy with per-pod bearer auth. No third-party model provider — just RunPod for the GPU.
+**Self-hosted Claude-Code-equivalent agentic coding inside VSCodium, with zero data retention.** One-line deploy. Cline talks to an open-source model running on rented GPUs in an ISO 27001 / Tier 3-4 datacenter, with TLS to the provider edge and a per-pod bearer token. No third-party model provider. Choose your GPU provider — **Vast.ai Secure Cloud** (cheaper, more on-demand capacity) or **RunPod Secure Cloud** (the original path) — and mix per-tier freely.
 
-## Three profiles, two compute modes
+## Three profiles, two providers, two compute modes
 
-Pick a profile (haiku / sonnet / opus). Pick a compute mode (always-on **pod** for predictable latency, or **serverless** for pay-per-second with scale-to-zero).
+Pick a **profile** (haiku / sonnet / opus = small / medium / frontier model). Pick a **provider** (Vast.ai Secure Cloud or RunPod Secure Cloud). Pick a **compute mode** (always-on **pod** for predictable latency, or **serverless** for pay-per-second with scale-to-zero).
 
-| Profile | Closest Claude | Open-source model | Weights | GPU shape | Pod $/hr | Pod $/mo @ 80h |
-|---|---|---|---|---|---|---|
-| **haiku** | Haiku 4.5 | Qwen2.5-Coder-32B-AWQ | 18 GiB INT4 | 1× 24 GB (A5000/L4/4090) | ~$0.27–0.41 | ~$22–33 |
-| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 149 GiB FP8 | 4× A100-SXM4 80GB | ~$5.96 | $477 |
-| **opus** | Opus 4.7 | Kimi K2.6 | 554 GiB mixed | 8× H100-SXM 80GB | ~$23.92 | $1,914 |
+| Profile | Closest Claude | Open-source model | Weights | GPU shape |
+|---|---|---|---|---|
+| **haiku** | Haiku 4.5 | Qwen2.5-Coder-32B-AWQ | 18 GiB INT4 | 1× 24 GB (RTX 4090) |
+| **sonnet** *(default)* | Sonnet 4.6 | DeepSeek V4 Flash | 149 GiB FP8 | 4× A100-SXM4 80GB (or 4× H100 80GB) |
+| **opus** | Opus 4.7 | Kimi K2.6 | 554 GiB mixed | 8× H100-SXM 80GB |
 
-GPU shapes are sized to fit each model's weights plus headroom for a useful KV-cache context window. Tune via env: `GPU_TYPE_ID`, `GPU_COUNT`, `TP_SIZE`, `MAX_LEN`.
+GPU shapes are sized to fit each model's weights plus KV-cache headroom for a useful context window. Tune via env: `GPU_TYPE_ID`/`GPU_NAME`, `GPU_COUNT`/`NUM_GPUS`, `TP_SIZE`, `MAX_LEN`.
 
-Run any one, or all three in parallel against the same LiteLLM endpoint and switch between them in Cline by changing the Model ID. Serverless is available for `haiku` today (`haiku-serverless`); sonnet/opus serverless support is on the roadmap.
+Run any combination in parallel against the same local LiteLLM endpoint and switch between them in Cline by changing the Model ID. Available model IDs out of the box:
+
+```
+haiku             haiku-vast              haiku-serverless
+sonnet            sonnet-vast
+opus              opus-vast
+```
+
+(plain name = RunPod pod, `-vast` = Vast.ai Secure Cloud pod, `-serverless` = RunPod Serverless.)
+
+## Cost comparison — live snapshot, May 2026
+
+Always-on pod pricing for our three shapes, per current available on-demand offer:
+
+| Tier | RunPod Secure $/hr | Vast Secure Cloud $/hr | Notes |
+|---|---|---|---|
+| haiku (1× RTX 4090 24GB) | $0.69 | **$0.40–0.67** | Vast cheapest when an Iceland host is rentable, otherwise UK/HU ~$0.67 |
+| sonnet (4× A100-SXM4 80GB or 4× H100 SXM) | $5.96 (often sold out) | **$4.27** (A100) or **$5.87** (H100 SXM) | Vast supply varies hour-to-hour; only 1–2 hosts at a time |
+| opus (8× H100 SXM 80GB) | $23.92 (often sold out) | **$11.74** | France datacenter, when listed |
+| opus *(alt)* 4× H200 140GB | — | **$7.74** | 560 GiB total > Kimi K2.6's 554 GiB weights |
+
+Serverless (pay-per-second of actual GPU usage, $0 idle):
+
+| Tier | RunPod Serverless | Vast Serverless | Notes |
+|---|---|---|---|
+| haiku | ~$0.50/hr while running, $0 idle | ~$0.40–0.67/hr while running | Cold start ~3–5 min on RunPod (lazy vLLM init); Vast similar |
+| sonnet | not wired today | not wired today | Both providers support the workflow; needs a script. Tracked in TODO. |
+| opus | not wired today | not wired today | Same. |
+
+**TL;DR**: Vast.ai Secure Cloud beats RunPod on price across all three tiers when capacity is available — but the 80 GB datacenter market is thin on both providers today. Mix-and-match per-tier is the practical pattern.
+
+Run any one, or all combinations in parallel; switch between them in Cline by changing the Model ID.
 
 ## Architecture
 
@@ -29,42 +60,35 @@ flowchart LR
         LiteLLM["LiteLLM proxy<br/>Docker, :4000"]
         Cline -->|"localhost:4000"| LiteLLM
     end
-    LiteLLM -.->|"HTTPS + bearer<br/>per-profile token"| Proxy
-    subgraph rp["RunPod"]
-        Proxy["proxy.runpod.net<br/>(TLS termination)"]
-        Proxy --> GPUH["haiku pod<br/>1× 24GB<br/>Qwen2.5-Coder-32B-AWQ"]
-        Proxy --> GPUS["sonnet pod<br/>4× A100 80GB<br/>DeepSeek V4 Flash"]
-        Proxy --> GPUO["opus pod<br/>8× H100 80GB<br/>Kimi K2.6"]
-        Proxy --> SLS["haiku-serverless<br/>worker-v1-vllm<br/>24/32/48GB pool"]
+    LiteLLM -.->|"HTTPS + bearer (RunPod)<br/>HTTP + bearer (Vast)<br/>per-profile token"| Edge
+    subgraph providers["Provider Secure Cloud"]
+        Edge["Provider edge<br/>RunPod TLS proxy / Vast direct port"]
+        Edge --> GPUH["haiku<br/>1× RTX 4090 24GB<br/>Qwen2.5-Coder-32B-AWQ"]
+        Edge --> GPUS["sonnet<br/>4× A100 / H100 80GB<br/>DeepSeek V4 Flash"]
+        Edge --> GPUO["opus<br/>8× H100 80GB<br/>Kimi K2.6"]
+        Edge --> SLS["serverless variants<br/>scale-to-zero workers"]
     end
 ```
 
-- **LiteLLM** = local OpenAI-compatible proxy. Routes per-profile aliases, holds master API key.
-- **RunPod HTTPS proxy** = `https://<pod-id>-8000.proxy.runpod.net`, TLS-terminated by RunPod, authed via a per-profile bearer token that LiteLLM injects.
-- **vLLM** (pods) / **runpod/worker-v1-vllm** (serverless) = OpenAI-compatible model server. Both serve `/v1/chat/completions`.
+- **LiteLLM** = local OpenAI-compatible proxy. Routes per-profile aliases, holds the master API key, injects per-route bearer tokens.
+- **RunPod edge** = `https://<pod-id>-8000.proxy.runpod.net`, TLS-terminated by RunPod. Bearer auth between LiteLLM and vLLM.
+- **Vast.ai edge** = direct port-forward to the host, `http://<host-ip>:<host-port>`. Bearer auth required (HTTP — see caveats).
+- **vLLM** = OpenAI-compatible model server. Serves `/v1/chat/completions` and friends.
 - **Cline** = the agentic coding extension in VSCodium. Talks to LiteLLM on localhost.
 
-There is no mesh VPN. The earlier WireGuard-based design was dropped in favor of RunPod's managed HTTPS proxy + bearer tokens — same E2E security envelope (TLS to RunPod, bearer to vLLM), simpler to operate.
+There is no mesh VPN. The earlier WireGuard-based design was dropped in favor of provider-managed transport (TLS or direct port-forward) + bearer tokens — same E2E security envelope, simpler to operate.
 
 ## What ZDR means here
 
-There is no managed model provider in the path. The transport from your laptop to the GPU pod is TLS to RunPod's edge, then over RunPod's internal network to the pod. LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Prompts never touch a third party.
+There is no managed model provider in the inference path. Both supported providers — Vast.ai Secure Cloud and RunPod Secure Cloud — are ISO 27001 / Tier 3-4 datacenter operators with signed Data Processing Agreements; on Vast the script filters `datacenter: {eq: true}` to stay in that tier and never lands on the marketplace. LiteLLM is configured with `turn_off_message_logging: true` and `disable_spend_logs: true`. Prompts never touch a third party.
 
-For HIPAA: RunPod offers BAA-eligible Secure Cloud — email `support@runpod.io` to execute (1–2 business day turnaround, no Enterprise contract required).
+For HIPAA: both providers offer BAA-eligible Secure Cloud.
+- **RunPod**: email `support@runpod.io` — 1–2 business days, no Enterprise contract required.
+- **Vast.ai**: BAAs are available for qualifying customers on the Secure Cloud tier; request via their account portal.
 
 ## Setup
 
-Three steps.
-
-### 1. Get a RunPod API key
-
-https://console.runpod.io/user/settings → **API Keys** → **Create API Key**.
-
-Permissions: pick **All** (full read/write to `api.runpod.io/graphql` *and* `api.runpod.ai`). The "Restricted" scope works for the pod path but returns 403 against the serverless `/openai/v1` inference endpoint — pick **All** if you want both paths to work.
-
-Add credits to your RunPod account.
-
-### 2. Install prerequisites — one command
+### 1. Install prerequisites — one command
 
 ```bash
 # macOS or Ubuntu/Debian
@@ -80,44 +104,80 @@ Installs Docker, jq, openssl, flock, VSCodium, and the Cline extension. macOS us
 
 > **Windows note:** the deploy/destroy/smoketest scripts are bash. Run them via WSL2 (recommended — Docker Desktop on Windows uses WSL2 anyway) or Git Bash.
 
+### 2. Get a provider API key
+
+Pick one (or both — you can mix per-tier).
+
+**Vast.ai (recommended — cheaper, more on-demand capacity):**
+
+1. Sign up at https://cloud.vast.ai/ (credit card, no sales contact — "Reserved" tier is the only one that's sales-gated and we don't use it).
+2. https://cloud.vast.ai/account/ → **Create API Key** → **Advanced** tab.
+3. Grant the minimum permissions our script uses:
+
+   | Permission | Set to | Why |
+   |---|---|---|
+   | **User** | Read | Some endpoints resolve account context from the token |
+   | **Instances** | **Read + Write** | Required — script creates, polls, and deletes instances |
+   | Billing/Earning | *neither* | We never query billing; principle of least privilege |
+   | Miscellaneous | Enabled (default) | Fine |
+   | **2FA** | **Off** (don't require) | Programmatic key for unattended scripts; 2FA would break it |
+
+4. Vast shows the key string **once at creation** — copy it immediately into `.env` as `VAST_API_KEY=…`. If you lose it, delete the key and create a new one.
+
+**RunPod (original path — pods + serverless, currently low 80GB capacity):**
+
+1. https://console.runpod.io/user/settings → **API Keys** → **Create API Key**.
+2. **Permissions: All** (full read/write to `api.runpod.io/graphql` *and* `api.runpod.ai`). The "Restricted" scope works for the pod path but returns **403** against the serverless `/openai/v1` inference endpoint — pick **All** if you want both paths to work.
+3. Copy key into `.env` as `RUNPOD_API_KEY=…`. Add credits to the account.
+
 ### 3. Configure & deploy
 
 ```bash
 cp .env.example .env
-$EDITOR .env             # set RUNPOD_API_KEY (only required value)
-
-./scripts/deploy.sh sonnet     # default profile, ~Sonnet 4.6 quality
+$EDITOR .env             # set VAST_API_KEY and/or RUNPOD_API_KEY
 ```
 
-Or pick a different tier:
+**Vast.ai path (recommended):**
 
 ```bash
-./scripts/deploy.sh haiku                # always-on pod, ~Haiku 4.5 quality
+./scripts/deploy-vast.sh haiku           # 1× RTX 4090, ~$0.40–0.67/hr
+./scripts/deploy-vast.sh sonnet          # 4× A100/H100 80GB
+./scripts/deploy-vast.sh opus            # 8× H100 80GB
+```
+
+**RunPod path (fallback / serverless):**
+
+```bash
+./scripts/deploy.sh haiku                # 1× 24GB always-on pod
+./scripts/deploy.sh sonnet               # 4× A100-SXM4 80GB always-on
+./scripts/deploy.sh opus                 # 8× H100 80GB always-on
 ./scripts/deploy-serverless.sh haiku     # scale-to-zero serverless variant
-./scripts/deploy.sh opus                 # always-on pod, ~Opus 4.7 quality
 ```
 
-Run multiple in parallel (parallel cold start, ~20 min wall time vs serial):
+Run multiple in parallel (parallel cold start, ~15-20 min wall time vs serial):
 
 ```bash
-./scripts/deploy.sh all
-# — or in three terminals for cleaner logs —
-./scripts/deploy.sh haiku
-./scripts/deploy.sh sonnet
-./scripts/deploy.sh opus
+./scripts/deploy-vast.sh haiku &  ./scripts/deploy.sh sonnet &  wait
+# — or in separate terminals for cleaner logs.
 ```
 
-Each deploy provisions its own pod or serverless endpoint, generates its own bearer token, and exposes a separate model alias in LiteLLM. They share one local LiteLLM endpoint on `http://localhost:4000` — switch between profiles in Cline by changing the **Model ID** field (`haiku` / `haiku-serverless` / `sonnet` / `opus`).
+Each deploy provisions one pod/endpoint, generates its own bearer token, and exposes a separate model alias in LiteLLM. All share `http://localhost:4000` — switch between them in Cline by changing the **Model ID**:
+
+```
+haiku | sonnet | opus                                  ← RunPod pods
+haiku-vast | sonnet-vast | opus-vast                   ← Vast.ai Secure Cloud pods
+haiku-serverless                                       ← RunPod Serverless
+```
 
 When you're done coding:
 
 ```bash
-./scripts/destroy.sh                     # tears down everything
-./scripts/destroy.sh sonnet              # one pod
+./scripts/destroy.sh                     # tears down everything across both providers
+./scripts/destroy.sh sonnet-vast         # one tier
 ./scripts/destroy.sh haiku-serverless    # one serverless endpoint
 ```
 
-Pod termination stops RunPod billing within ~1 minute. Serverless `workersMin=0` means idle cost is already $0; teardown deletes the endpoint + template.
+Pod termination stops billing within ~1 minute. Serverless `workersMin=0` means idle cost is already $0; teardown deletes the endpoint + template.
 
 ### 4. Point Cline at it
 
@@ -132,68 +192,28 @@ To swap between models mid-session: change the **Model ID** field. No restart, n
 
 ## Pod vs Serverless — when each wins
 
-| | **Pod** | **Serverless** |
+|  | **Pod (always-on)** | **Serverless (scale-to-zero)** |
 |---|---|---|
-| Idle cost | $0.27–$23.92/hr always-on | $0/hr (scales to 0) |
-| Active cost | included | per-second worker billing |
-| Cold start | ~15 min once (model cache survives container restarts on the same pod) | ~3–5 min on first request after idle (vLLM lazy-inits) |
-| Capacity risk | Subject to GPU supply per pool/region | Multi-region worker pool, more elastic |
-| Best for | Continuous use, low latency requirements | Bursty/intermittent use, idle hours don't matter |
+| Idle cost | $0.40–$23.92/hr always-on | $0/hr |
+| Active cost | included | per-second of worker uptime / execution |
+| First request after idle | instant (host stays warm) | ~3–5 min cold-start (worker spawns, vLLM lazy-inits, model loads to GPU) |
+| One-time cold start | ~10–15 min first deploy | ~5–10 min first request |
+| Capacity risk | Subject to GPU supply per pool/region | Provider auto-pools across hosts |
+| Best for | 4+ hrs/day continuous coding | Bursty, intermittent, demos, occasional use |
 
-If you code 6+ hrs/day on the same tier: pods. If you code 1–2 hrs/day or intermittently: serverless.
+If you code 6+ hrs/day on the same tier: **pods**. If you code 1–2 hrs/day or intermittently: **serverless**. Rule of thumb: serverless wins when `(hours/day) × ($/hr) < ($/hr × 24)` — anything below ~10 hrs/day favors serverless for the cheapest tier; tighter for opus where idle cost dominates.
 
-## Alternative provider: Vast.ai (Secure Cloud)
+## Things we learned the hard way
 
-RunPod's secure-cloud capacity for 24 GB cards (haiku) and 80 GB datacenter cards (sonnet/opus) is often constrained. [Vast.ai](https://vast.ai/) has a **Secure Cloud** tier — ISO 27001 / Tier 3/4 datacenter partners, BAA available — that lines up with this project's ZDR/HIPAA posture and consistently has capacity at all three GPU tiers, at lower prices than RunPod.
+Field-tested gotchas baked into the scripts as comments + filters; for users of the scripts these are *not* surprises:
 
-`scripts/deploy-vast.sh` filters offers with `datacenter: {eq: true}` so we never accidentally land on a marketplace ("verified" but non-datacenter) host. Vast's plain `verified` flag just means "passes basic reliability checks" and is **not** an attestation — don't confuse the two.
-
-Live Secure Cloud pricing (May 2026, lowest available datacenter offer matching our GPU shape and disk requirement):
-
-| Tier | Shape | RunPod Secure $/hr | Vast Secure Cloud $/hr | Savings |
-|---|---|---|---|---|
-| haiku | 1× RTX 4090 24GB | $0.69 | **$0.38** | ~45% |
-| sonnet | 4× A100-SXM4 80GB | $5.96 (sold out today) | **$4.27** | ~28% |
-| opus | 8× H100 SXM 80GB | $23.92 (sold out today) | **$11.74** | ~51% |
-| opus *(alt)* | 4× H200 140GB | — | **$7.74** | even better (560 GB > Kimi K2.6's 554 GB) |
-
-Same one-line interface, separate script:
-
-```bash
-cp .env.example .env
-$EDITOR .env             # set VAST_API_KEY from https://cloud.vast.ai/account/
-
-./scripts/deploy-vast.sh haiku      # 1× RTX 4090
-./scripts/deploy-vast.sh sonnet     # 4× A100-80GB on one host
-./scripts/deploy-vast.sh opus       # 8× H100-80GB on one host
-```
-
-### Vast.ai API key permissions
-
-At https://cloud.vast.ai/account/ → **Create API Key** → **Advanced** tab, grant the minimum set our script actually uses:
-
-| Permission | Set to | Why |
-|---|---|---|
-| **User** | Read | Some endpoints resolve your account context from the token |
-| **Instances** | **Read + Write** | Required — script creates, polls, and deletes instances |
-| Billing/Earning | *neither* | We never query billing; principle of least privilege |
-| Miscellaneous | Enabled (default) | Fine |
-| **2FA** | **Off** (don't require) | This is a programmatic key for an unattended script; 2FA would break it |
-
-Vast shows the key string **once** at creation — copy it immediately into `.env` as `VAST_API_KEY=…`. If you lose it, delete the key and create a new one.
-
-Model IDs in Cline become `haiku-vast` / `sonnet-vast` / `opus-vast`. Mix providers freely — RunPod pod for haiku, Vast for sonnet, anything you want.
-
-Teardown:
-
-```bash
-./scripts/destroy.sh sonnet-vast    # one tier
-./scripts/destroy.sh all            # everything across both providers
-```
-
-**Vast caveats.**
-- **Plain HTTP transport.** Vast's direct-port-forwarding gives you `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. For full TLS termination, run Caddy/Cloudflared as a sidecar in the container. Filed as a future improvement.
-- **ZDR depends on the Secure Cloud filter.** `deploy-vast.sh` hardcodes `datacenter: {eq: true}` — if you bypass the script and rent from Vast's marketplace tier directly, you lose the ZDR/HIPAA posture. Marketplace hosts are independent contractors with no Vast-side compliance attestation, only Docker-level isolation.
+- **Vast `verified` ≠ datacenter.** `verified: {eq: true}` is "host passes basic reliability checks" (marketplace tier, Docker-only isolation). The actual ZDR/HIPAA filter is `datacenter: {eq: true}` (ISO 27001, Tier 3/4, BAA-eligible). `deploy-vast.sh` hardcodes the latter.
+- **Vast rents whole hosts.** Search must use `num_gpus: {eq: N}`, not `gte: N` — otherwise picking an 8-GPU host for a 4-GPU TP config double-bills you.
+- **CUDA forward-compat doesn't work on consumer Ada.** `vllm/vllm-openai:latest` currently ships CUDA 12.8+. RTX 4090 hosts with driver < 580 (cuda_max_good < 13.0) fail with `cudaInit error 804: forward compatibility was attempted on non supported HW`. Filter forces `cuda_max_good: {gte: 13.0}` to skip them. Long-term fix: pin our `gpu-node/Dockerfile` to a vLLM tag with older CUDA so the cheap driver-565 market becomes accessible.
+- **`runpod/worker-v1-vllm` has no `:stable` or `:latest` tag.** Only versioned tags (`:v2.18.1` etc.). `:stable` silently stalls worker initialization forever. `deploy-serverless.sh` pins to a known good version.
+- **RunPod's `Restricted` API-key scope returns 403 on `/v2/<id>/openai/v1`.** Pick **All** scope for serverless inference — basic pod management would otherwise work but the inference path won't.
+- **Plain HTTP transport on Vast.** Vast direct-port-forwarding gives `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. Adequate for personal coding given the bearer; for full TLS, run a Caddy/Cloudflared sidecar. Filed as a future improvement.
+- **Vast Serverless** exists at https://docs.vast.ai/guides/serverless but isn't wired in this repo yet. Same ZDR question applies — would need the Secure Cloud worker pool filter. Tracked.
 
 ## How `zdr-coder` compares to similar projects
 
@@ -209,12 +229,12 @@ Teardown:
 
 ## Caveats
 
-- **RunPod BAA is a separate process.** Email `support@runpod.io` if you need it — 1–2 business days, no Enterprise commitment.
+- **BAA is a separate process on both providers.** RunPod: email `support@runpod.io` (1–2 business days). Vast.ai: request via account portal on the Secure Cloud tier.
 - **Cold start is slow.** Pods: ~10–20 min for haiku/sonnet; ~20–30 min for opus (Kimi K2.6 weights are large). Serverless: ~3–5 min on first request after scale-to-zero. Run profiles in parallel to overlap warmups.
-- **24 GB GPU supply is tight.** Haiku targets a 24 GB card (A5000 / L4 / 4090) — RunPod's secure-cloud supply has been spotty during testing. `deploy.sh haiku` lets you override `GPU_TYPE_ID`; the serverless variant uses a multi-pool list (24/32/48 GB) and picks whichever has capacity.
-- **No persistent vLLM cache by default.** Weights re-download on every fresh pod. RunPod supports persistent volumes if you want to keep them.
+- **80 GB datacenter supply is thin on both providers.** Sonnet (4× A100/H100 80GB) and opus (8× H100 80GB) Secure-Cloud inventory rotates hourly — sometimes there's 1–2 candidate hosts, sometimes none. Have a fallback plan; `GPU_NAME="H200"` is one for sonnet.
+- **No persistent vLLM cache by default.** Weights re-download on every fresh pod. Both providers support persistent volumes if you want to keep them.
 - **Hugging Face anonymous access.** Models like Qwen2.5-Coder-32B-AWQ and DeepSeek V4 Flash work without a token. Gated models need `HF_TOKEN` in `.env`.
-- **Parallel mode billing.** All three pod profiles running ≈ ~$30/hr (haiku $0.41 + sonnet $5.96 + opus $23.92). Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
+- **Parallel mode billing.** All three pod profiles running ≈ ~$18-30/hr (haiku $0.40 + sonnet $4-6 + opus $12-24). Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
 
 ## Files
 
@@ -230,9 +250,10 @@ Teardown:
 ├── scripts/
 │   ├── install-prereqs.sh        # macOS/Linux installer (Homebrew/apt)
 │   ├── install-prereqs.ps1       # Windows installer (Chocolatey, PowerShell)
-│   ├── deploy.sh                 # one-line pod deploy (per profile or all)
-│   ├── deploy-serverless.sh      # one-line serverless deploy (haiku today)
-│   ├── destroy.sh                # one-line teardown (per profile, including serverless)
+│   ├── deploy.sh                 # RunPod pod deploy (per profile or all)
+│   ├── deploy-vast.sh            # Vast.ai Secure Cloud pod deploy (per profile)
+│   ├── deploy-serverless.sh      # RunPod Serverless deploy (haiku today)
+│   ├── destroy.sh                # teardown (any profile across providers)
 │   ├── preflight.sh              # validates prereqs + .env
 │   └── smoketest.sh              # end-to-end path test (per profile)
 ├── .github/workflows/            # auto-builds GPU image to GHCR
@@ -253,6 +274,12 @@ Teardown:
 **Serverless worker dies with `CUDA initialization failed: out of memory` during fitness check** — host-level GPU has stale allocations from a prior worker. RunPod usually re-schedules; if it loops, exclude the specific GPU pool (e.g. drop `AMPERE_24` from `gpuIds` to skip A5000/3090 hosts) and the next worker will land elsewhere.
 
 **Cold-start request hits Cloudflare 524** — the sync `/openai/v1` path has a ~600s edge timeout. The worker is fine; subsequent requests will succeed once it finishes warming. Or use the async `/run` + `/status` API for very long warmups.
+
+**Vast deploy reaches "RUNNING" but vLLM crashes with `cudaInit error 804: forward compatibility was attempted on non supported HW`** — the host's NVIDIA driver is older than our container's CUDA libs, and consumer Ada GPUs (RTX 4090) don't get CUDA forward-compat. Bump the script's `cuda_max_good` filter higher, or rebuild `gpu-node/Dockerfile` from a vLLM tag that pins an older CUDA. The shipped filter is `≥ 13.0`.
+
+**Vast instance picks an offer but stalls on "Pulling fs layer" indefinitely** — host network can't reach GHCR (typical of CN-located hosts). Add a `geolocation` exclusion or raise `inet_down` minimum. The shipped script enforces `inet_down ≥ 500` Mbps.
+
+**Vast picks an 8-GPU host when you only need 4** — Vast rents whole hosts. The script uses `num_gpus: {eq: N}` (not `gte`) precisely to avoid this. If you override the search yourself, mirror that.
 
 ## Reporting vulnerabilities
 
