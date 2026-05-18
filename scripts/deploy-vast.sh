@@ -124,15 +124,13 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 if [ -z "$INSTANCE_ID" ]; then
-  # Filter for Vast's "Secure Cloud" tier (datacenter: true) — ISO 27001,
-  # Tier 3/4, BAA-eligible. This is the only tier compatible with this
-  # project's ZDR/HIPAA posture. Vast's plain `verified` filter just means
-  # "host passes basic reliability checks" — not a compliance attestation.
-  #
-  # Use eq (not gte) on num_gpus — Vast rents the whole physical host, so an
-  # "8-GPU offer" charges for all 8 even if our TP only needs 4. Match the
-  # exact count we need. If the user wants oversize for capacity, they can
-  # override NUM_GPUS in env.
+  # Filter for Vast Secure Cloud (datacenter: true) — ISO 27001, Tier 3/4,
+  # BAA-eligible. The plain `verified` flag only means "host passes basic
+  # reliability checks" and is NOT a compliance attestation — never use it
+  # as a substitute. Also use eq (not gte) on num_gpus — Vast rents the
+  # whole physical host, so an "8-GPU offer" charges for all 8 even if our
+  # TP only needs 4. cuda_max_good must be >= container CUDA (vllm/vllm-
+  # openai:latest currently 12.8+); consumer Ada has no CUDA forward-compat.
   SEARCH=$(jq -nc \
     --arg gpu "$GPU_NAME" \
     --argjson nGpus "$NUM_GPUS" \
@@ -147,9 +145,6 @@ if [ -z "$INSTANCE_ID" ]; then
       direct_port_count: {gte: 1},
       disk_space: {gte: $disk},
       inet_down: {gte: 500},
-      # vllm/vllm-openai:latest currently ships CUDA 12.8+ — RTX 4090 (consumer
-      # Ada) doesn't support CUDA forward-compat, so cuda_max_good must match
-      # the container's actual CUDA, not be lower. 13.0 covers driver 580+.
       cuda_max_good: {gte: 13.0},
       type: "on-demand",
       order: [["dph_total", "asc"]],
