@@ -42,7 +42,27 @@ case "${MODEL,,}" in
     ;;
 esac
 
-echo "[start.sh] Launching vLLM: model=$MODEL TP=$TP_SIZE MAX_LEN=$MAX_LEN"
+# CPU offload (lets you run a model with weights larger than your VRAM by
+# parking inactive layers in system RAM). Set OFFLOAD_GB=240 to offload
+# 240 GiB to CPU; combine with --enforce-eager to free up CUDA-graph VRAM.
+# Cost: 30-50% throughput hit per 100 GiB offloaded. Best fit for MoE
+# models where only a fraction of experts are active per token.
+if [ -n "${OFFLOAD_GB:-}" ] && [ "${OFFLOAD_GB}" != "0" ]; then
+  EXTRA_ARGS+=(--cpu-offload-gb "$OFFLOAD_GB")
+  # Disable CUDA graph capture — capturing graphs allocates extra VRAM
+  # that defeats the point of offloading.
+  EXTRA_ARGS+=(--enforce-eager)
+  echo "[start.sh] CPU offload: ${OFFLOAD_GB} GiB (--enforce-eager auto-set)"
+fi
+
+# Explicit eager-mode toggle (disable CUDA graphs without setting OFFLOAD_GB).
+# Useful when VRAM headroom is tight even without offload.
+if [ "${ENFORCE_EAGER:-0}" = "1" ] && [[ ! " ${EXTRA_ARGS[*]} " =~ " --enforce-eager " ]]; then
+  EXTRA_ARGS+=(--enforce-eager)
+  echo "[start.sh] --enforce-eager set"
+fi
+
+echo "[start.sh] Launching vLLM: model=$MODEL TP=$TP_SIZE MAX_LEN=$MAX_LEN OFFLOAD_GB=${OFFLOAD_GB:-0}"
 exec python3 -m vllm.entrypoints.openai.api_server \
   --model "$MODEL" \
   --tensor-parallel-size "$TP_SIZE" \
