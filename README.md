@@ -142,18 +142,20 @@ To swap between models mid-session: change the **Model ID** field. No restart, n
 
 If you code 6+ hrs/day on the same tier: pods. If you code 1–2 hrs/day or intermittently: serverless.
 
-## Alternative provider: Vast.ai
+## Alternative provider: Vast.ai (Secure Cloud)
 
-RunPod's secure-cloud capacity for 24 GB cards (haiku) and 80 GB datacenter cards (sonnet/opus) is often constrained. [Vast.ai](https://vast.ai/) is a marketplace of independent hosts running the same datacenter + consumer GPUs at significantly lower prices, with per-second billing and no commitment. Verified offers (datacenter-grade hosts) are filterable via the API.
+RunPod's secure-cloud capacity for 24 GB cards (haiku) and 80 GB datacenter cards (sonnet/opus) is often constrained. [Vast.ai](https://vast.ai/) has a **Secure Cloud** tier — ISO 27001 / Tier 3/4 datacenter partners, BAA available — that lines up with this project's ZDR/HIPAA posture and consistently has capacity at all three GPU tiers, at lower prices than RunPod.
 
-Live pricing snapshot (May 2026, verified on-demand offers, lowest available `$/hr`):
+`scripts/deploy-vast.sh` filters offers with `datacenter: {eq: true}` so we never accidentally land on a marketplace ("verified" but non-datacenter) host. Vast's plain `verified` flag just means "passes basic reliability checks" and is **not** an attestation — don't confuse the two.
 
-| Tier | Shape | RunPod $/hr | Vast.ai $/hr | Savings |
+Live Secure Cloud pricing (May 2026, lowest available datacenter offer matching our GPU shape and disk requirement):
+
+| Tier | Shape | RunPod Secure $/hr | Vast Secure Cloud $/hr | Savings |
 |---|---|---|---|---|
-| haiku | 1× RTX 4090 24GB | $0.69 | **$0.20** | ~70% |
-| sonnet | 4× A100-SXM4 80GB | $5.96 | **$2.14** | ~64% |
-| opus | 8× H100 SXM 80GB | $23.92 (often sold out) | **$11.75** | ~51% |
-| opus *(alt)* | 4× H200 140GB | — | **$10.33** | even better (560 GB > Kimi K2.6's 554 GB) |
+| haiku | 1× RTX 4090 24GB | $0.69 | **$0.38** | ~45% |
+| sonnet | 4× A100-SXM4 80GB | $5.96 (sold out today) | **$4.27** | ~28% |
+| opus | 8× H100 SXM 80GB | $23.92 (sold out today) | **$11.74** | ~51% |
+| opus *(alt)* | 4× H200 140GB | — | **$7.74** | even better (560 GB > Kimi K2.6's 554 GB) |
 
 Same one-line interface, separate script:
 
@@ -189,7 +191,9 @@ Teardown:
 ./scripts/destroy.sh all            # everything across both providers
 ```
 
-**Vast caveat — plain HTTP.** Vast's direct-port-forwarding gives you `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. That's identical to the security envelope of the original WireGuard design and adequate for personal coding use, but if you need full TLS termination, run Caddy/Cloudflared as a sidecar inside the same container group. Filed as a future improvement.
+**Vast caveats.**
+- **Plain HTTP transport.** Vast's direct-port-forwarding gives you `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. For full TLS termination, run Caddy/Cloudflared as a sidecar in the container. Filed as a future improvement.
+- **ZDR depends on the Secure Cloud filter.** `deploy-vast.sh` hardcodes `datacenter: {eq: true}` — if you bypass the script and rent from Vast's marketplace tier directly, you lose the ZDR/HIPAA posture. Marketplace hosts are independent contractors with no Vast-side compliance attestation, only Docker-level isolation.
 
 ## How `zdr-coder` compares to similar projects
 

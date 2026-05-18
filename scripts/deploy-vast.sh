@@ -77,7 +77,8 @@ case "$PROFILE" in
     TP_SIZE="${TP_SIZE:-4}"
     MAX_LEN="${MAX_LEN:-65536}"
     GPU_UTIL="${GPU_UTIL:-0.95}"
-    DISK_GB="${DISK_GB:-400}"
+    # 149 GiB model + 50 GiB buffer. 400 GB filter eliminates most A100 hosts.
+    DISK_GB="${DISK_GB:-200}"
     ;;
   opus)
     # 8x 80GB on a single host for TP=8. H100 SXM is the target; override
@@ -123,19 +124,29 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 if [ -z "$INSTANCE_ID" ]; then
+  # Filter for Vast's "Secure Cloud" tier (datacenter: true) — ISO 27001,
+  # Tier 3/4, BAA-eligible. This is the only tier compatible with this
+  # project's ZDR/HIPAA posture. Vast's plain `verified` filter just means
+  # "host passes basic reliability checks" — not a compliance attestation.
+  #
+  # Use eq (not gte) on num_gpus — Vast rents the whole physical host, so an
+  # "8-GPU offer" charges for all 8 even if our TP only needs 4. Match the
+  # exact count we need. If the user wants oversize for capacity, they can
+  # override NUM_GPUS in env.
   SEARCH=$(jq -nc \
     --arg gpu "$GPU_NAME" \
     --argjson nGpus "$NUM_GPUS" \
     --argjson ram "$GPU_RAM_MB" \
     --argjson disk "$DISK_GB" \
     '{
-      verified: {eq: true},
+      datacenter: {eq: true},
       rentable: {eq: true},
       gpu_name: {eq: $gpu},
-      num_gpus: {gte: $nGpus},
+      num_gpus: {eq: $nGpus},
       gpu_ram: {gte: $ram},
       direct_port_count: {gte: 1},
       disk_space: {gte: $disk},
+      inet_down: {gte: 500},
       cuda_max_good: {gte: 12.0},
       type: "on-demand",
       order: [["dph_total", "asc"]],
@@ -147,12 +158,12 @@ if [ -z "$INSTANCE_ID" ]; then
   OFFER_GPUS=$(echo "$R" | jq -r '.offers[0].num_gpus // empty')
   OFFER_GEO=$(echo "$R" | jq -r '.offers[0].geolocation // "unknown"')
   if [ -z "$OFFER_ID" ]; then
-    echo "FAIL: no verified on-demand offers matching $NUM_GPUS× $GPU_NAME" >&2
+    echo "FAIL: no verified on-demand offers matching ${NUM_GPUS}× $GPU_NAME" >&2
     echo "  → Try a different GPU_NAME (RTX 5090, A40, L40S, H200, B200)" >&2
     echo "  → Or relax verified=true via VAST_VERIFIED_ONLY=0 (not implemented yet)" >&2
     exit 1
   fi
-  echo "  ✓ Offer picked: $OFFER_ID — $OFFER_GPUS× $GPU_NAME @ \$$OFFER_PRICE/hr ($OFFER_GEO)"
+  echo "  ✓ Offer picked: $OFFER_ID — ${OFFER_GPUS}× $GPU_NAME @ \$$OFFER_PRICE/hr ($OFFER_GEO)"
 
   # Build env vars + onstart command. start.sh in the image reads MODEL etc.
   ONSTART="env >> /etc/environment && /start.sh"
