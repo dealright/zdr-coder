@@ -166,6 +166,20 @@ $EDITOR .env             # set VAST_API_KEY from https://cloud.vast.ai/account/
 ./scripts/deploy-vast.sh opus       # 8× H100-80GB on one host
 ```
 
+### Vast.ai API key permissions
+
+At https://cloud.vast.ai/account/ → **Create API Key** → **Advanced** tab, grant the minimum set our script actually uses:
+
+| Permission | Set to | Why |
+|---|---|---|
+| **User** | Read | Some endpoints resolve your account context from the token |
+| **Instances** | **Read + Write** | Required — script creates, polls, and deletes instances |
+| Billing/Earning | *neither* | We never query billing; principle of least privilege |
+| Miscellaneous | Enabled (default) | Fine |
+| **2FA** | **Off** (don't require) | This is a programmatic key for an unattended script; 2FA would break it |
+
+Vast shows the key string **once** at creation — copy it immediately into `.env` as `VAST_API_KEY=…`. If you lose it, delete the key and create a new one.
+
 Model IDs in Cline become `haiku-vast` / `sonnet-vast` / `opus-vast`. Mix providers freely — RunPod pod for haiku, Vast for sonnet, anything you want.
 
 Teardown:
