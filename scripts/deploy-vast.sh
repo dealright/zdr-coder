@@ -192,8 +192,27 @@ if [ -z "$INSTANCE_ID" ]; then
   fi
   echo "  ✓ Offer picked: $OFFER_ID — ${OFFER_GPUS}× $GPU_NAME @ \$$OFFER_PRICE/hr ($OFFER_GEO)"
 
-  # Build env vars + onstart command. start.sh in the image reads MODEL etc.
-  ONSTART="env >> /etc/environment && /start.sh"
+  # Detect pre-populated volume from vol-up.sh. If present we pin to that
+  # host (volumes are machine_id-scoped) and mount /workspace/hf-cache so
+  # vLLM reads weights from local disk instead of re-downloading from HF.
+  VOL_STATE=".runpod-state.${ROUTE}-volume"
+  VOL_MOUNT_JSON='[]'
+  if [ -f "$VOL_STATE" ]; then
+    VOL_ID=$(grep '^VOLUME_ID=' "$VOL_STATE" | cut -d= -f2)
+    VOL_MACHINE=$(grep '^MACHINE_ID=' "$VOL_STATE" | cut -d= -f2)
+    if [ -n "$VOL_ID" ] && [ -n "$VOL_MACHINE" ]; then
+      VOL_MOUNT_JSON="[{\"volume_id\":$VOL_ID,\"mount_path\":\"/workspace/hf-cache\"}]"
+      echo "  ✓ Volume $VOL_ID detected — pinning to machine_id=$VOL_MACHINE"
+      # Re-search filtered to that specific host so the picked offer is on it.
+      RESEARCH=$(jq -nc --argjson m "$VOL_MACHINE" '{rentable:{eq:true},machine_id:{eq:$m},type:"on-demand",limit:1}')
+      OFFER_ID=$(vast POST "/bundles/" "$RESEARCH" | jq -r '.offers[0].id // empty')
+      [ -n "$OFFER_ID" ] || { echo "FAIL: pinned host $VOL_MACHINE not rentable right now" >&2; exit 1; }
+    fi
+  fi
+
+  # Build env vars + onstart command. start.sh reads MODEL etc; when a
+  # volume is mounted, point HF_HOME at it so vLLM uses cached weights.
+  ONSTART='env >> /etc/environment && [ -d /workspace/hf-cache ] && export HF_HOME=/workspace/hf-cache; /start.sh'
   CREATE_BODY=$(jq -nc \
     --arg image "$GPU_IMAGE" \
     --arg onstart "$ONSTART" \
@@ -204,6 +223,8 @@ if [ -z "$INSTANCE_ID" ]; then
     --arg tp "$TP_SIZE" \
     --arg vllmKey "$VLLM_API_KEY" \
     --arg hfTok "${HF_TOKEN:-}" \
+    --arg offload "${OFFLOAD_GB:-}" \
+    --argjson vols "$VOL_MOUNT_JSON" \
     '{
       client_id: "me",
       image: $image,
@@ -217,8 +238,9 @@ if [ -z "$INSTANCE_ID" ]; then
         "GPU_UTIL": $gpuUtil,
         "TP_SIZE": $tp,
         "VLLM_API_KEY": $vllmKey
-      } + (if $hfTok != "" then {"HF_TOKEN": $hfTok} else {} end))
-    }')
+      } + (if $hfTok    != "" then {"HF_TOKEN":    $hfTok}    else {} end)
+        + (if $offload  != "" then {"OFFLOAD_GB":  $offload}  else {} end))
+    } + (if ($vols | length) > 0 then {volume: $vols} else {} end)')
   R=$(vast PUT "/asks/${OFFER_ID}/" "$CREATE_BODY")
   INSTANCE_ID=$(echo "$R" | jq -r '.new_contract // .id // empty')
   [ -n "$INSTANCE_ID" ] || { echo "FAIL: instance create failed:" >&2; echo "$R" | jq . >&2; exit 1; }

@@ -190,6 +190,45 @@ The deploy script prints these — paste into VSCodium → Cline → gear:
 
 To swap between models mid-session: change the **Model ID** field. No restart, no redeploy.
 
+## Persistent model cache (volumes) — opus economics
+
+The 554 GiB Kimi K2.6 download dominates an opus cold-start. To avoid re-downloading on every deploy, pre-populate a Vast.ai data volume once and mount it on every subsequent deploy.
+
+```bash
+# Day 1 morning — populate volume (one-time ~1-2 hr download)
+./scripts/vol-up.sh opus
+# (volume now persists. Storage bills ~$0.05/GB/mo, prorated to the second.)
+
+# Each subsequent day:
+./scripts/deploy-vast.sh opus       # 3-5 min cold start, mounts volume
+# ...code...
+./scripts/destroy.sh opus-vast      # stops compute. Volume stays.
+
+# End of project (1 day, 1 week, whenever):
+./scripts/vol-down.sh opus          # storage billing stops
+```
+
+How the cost works for a typical month of opus use (4 hrs/day, 20 workdays, volume kept overnight):
+
+| Component | Cost |
+|---|---|
+| One-time populate (~1 hr compute + Vast volume creation) | ~$6 |
+| Volume storage (800 GB × ~$0.05/GB/mo) | ~$40/mo |
+| Active opus compute (20 × 4 hrs × $11.74/hr on Vast 8× H100 France) | ~$940/mo |
+| **Total self-hosted opus** | **~$986/mo** |
+
+Versus Anthropic Opus 4.7 API at typical agentic-coding token mix (~10K input / 2K output per step, ~100 steps/hr, ~$30/hr):
+
+| 80 hrs/mo of Opus use | Self-hosted | Anthropic | Savings |
+|---|---|---|---|
+| Opus | $986 | $2,400 | **~60%** |
+| Sonnet (4× A100 $3.28/hr × 80 hrs) | $263 | $480 | ~45% |
+| Haiku (1× 4090 $0.40/hr × 80 hrs) | $32 + LiteLLM | ~$70 | break-even |
+
+Crossover for opus is ~**1.5 hrs/day of active use**. Below that, Anthropic API is cheaper for the convenience.
+
+**Caveat**: Vast volumes are pinned to a specific `machine_id`. If that host disappears (operator takes it offline), the volume is unavailable until it comes back — `deploy-vast.sh` fails fast in that case. For multi-week reliability, prefer RunPod network volumes (region-scoped, not host-pinned); RunPod equivalent isn't wired in this repo yet — tracked.
+
 ## Pod vs Serverless — when each wins
 
 |  | **Pod (always-on)** | **Serverless (scale-to-zero)** |
@@ -252,8 +291,10 @@ Field-tested gotchas baked into the scripts as comments + filters; for users of 
 │   ├── install-prereqs.sh        # macOS/Linux installer (Homebrew/apt)
 │   ├── install-prereqs.ps1       # Windows installer (Chocolatey, PowerShell)
 │   ├── deploy.sh                 # RunPod pod deploy (per profile or all)
-│   ├── deploy-vast.sh            # Vast.ai Secure Cloud pod deploy (per profile)
+│   ├── deploy-vast.sh            # Vast.ai pod deploy (per profile)
 │   ├── deploy-serverless.sh      # RunPod Serverless deploy (haiku today)
+│   ├── vol-up.sh                 # create + populate a Vast persistent volume
+│   ├── vol-down.sh               # delete a Vast persistent volume
 │   ├── destroy.sh                # teardown (any profile across providers)
 │   ├── preflight.sh              # validates prereqs + .env
 │   └── smoketest.sh              # end-to-end path test (per profile)
