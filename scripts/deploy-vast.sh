@@ -139,11 +139,17 @@ if [ -z "$INSTANCE_ID" ]; then
   # forward-compat so the marketplace path can relax to 12.4 if needed.
   if [ "${VAST_ALLOW_MARKETPLACE:-0}" = "1" ]; then
     echo "  ⚠ VAST_ALLOW_MARKETPLACE=1 — accepting any rentable host (ZDR posture downgraded)"
+    # cuda_max_good: 13.0 here too (not 12.4) — RTX 4090 (consumer Ada) has
+    # no CUDA forward-compat regardless of provider tier, and the haiku
+    # profile always targets a 4090-class host. For sonnet/opus targeting
+    # H100/H200/A100 (datacenter Ampere/Hopper, which DO support forward-
+    # compat), users can override with CUDA_MAX_GOOD=12.4 in env if needed.
     SEARCH=$(jq -nc \
       --arg gpu "$GPU_NAME" \
       --argjson nGpus "$NUM_GPUS" \
       --argjson ram "$GPU_RAM_MB" \
       --argjson disk "$DISK_GB" \
+      --argjson cuda "${CUDA_MAX_GOOD:-13.0}" \
       '{
         rentable: {eq: true},
         gpu_name: {eq: $gpu},
@@ -152,7 +158,7 @@ if [ -z "$INSTANCE_ID" ]; then
         direct_port_count: {gte: 1},
         disk_space: {gte: $disk},
         inet_down: {gte: 500},
-        cuda_max_good: {gte: 12.4},
+        cuda_max_good: {gte: $cuda},
         type: "on-demand",
         order: [["dph_total", "asc"]],
         limit: 5
