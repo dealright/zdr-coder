@@ -147,7 +147,10 @@ if [ -z "$INSTANCE_ID" ]; then
       direct_port_count: {gte: 1},
       disk_space: {gte: $disk},
       inet_down: {gte: 500},
-      cuda_max_good: {gte: 12.6},
+      # vllm/vllm-openai:latest currently ships CUDA 12.8+ — RTX 4090 (consumer
+      # Ada) doesn't support CUDA forward-compat, so cuda_max_good must match
+      # the container's actual CUDA, not be lower. 13.0 covers driver 580+.
+      cuda_max_good: {gte: 13.0},
       type: "on-demand",
       order: [["dph_total", "asc"]],
       limit: 5
