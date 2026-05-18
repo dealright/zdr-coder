@@ -51,10 +51,13 @@ case "$PROFILE" in
     GPU_UTIL="${GPU_UTIL:-0.95}"
     ;;
   sonnet)
-    # DeepSeek V4 Flash (FP8): 158B params, ~148.7 GiB weights. 2x80GB is too
-    # tight — barely fits weights, no KV room. 4x80GB → ~171 GiB free for KV,
-    # comfortable 64K context. MoE: TP=4 splits experts cleanly.
-    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA A100-SXM4-80GB}"
+    # DeepSeek V4 Flash (FP8): 158B params, ~148.7 GiB weights. The FP8
+    # kernels (deepgemm) require Hopper (H100/H200) or Blackwell (B200/RTX
+    # PRO 6000) — Ampere A100 does not support FP8 natively and crashes
+    # with "Unsupported architecture" in deepgemm/hyperconnection at engine
+    # init. 4x80GB → ~171 GiB free for KV, comfortable 64K context. MoE:
+    # TP=4 splits experts cleanly.
+    GPU_TYPE_ID="${GPU_TYPE_ID:-NVIDIA H100 80GB HBM3}"
     GPU_COUNT="${GPU_COUNT:-4}"
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-400}"
     MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"

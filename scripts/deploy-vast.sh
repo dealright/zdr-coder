@@ -65,16 +65,18 @@ case "$PROFILE" in
     DISK_GB="${DISK_GB:-120}"
     ;;
   sonnet)
-    # 4x 80GB on a single host for TP=4. A100 SXM4 is the cheapest 80GB
-    # datacenter option that consistently lists multi-GPU offers.
-    GPU_NAME="${GPU_NAME:-A100 SXM4}"
+    # 4x 80GB on a single host for TP=4. H100 SXM (or H200 / B200) is
+    # required, NOT A100 — DeepSeek V4 Flash ships in FP8 and its deepgemm
+    # kernels reject Ampere with "Unsupported architecture". The Vast
+    # marketplace usually has 1-3 hosts in this class; price floor ~$5.87/hr.
+    GPU_NAME="${GPU_NAME:-H100 SXM}"
     NUM_GPUS="${NUM_GPUS:-4}"
     GPU_RAM_MB="${GPU_RAM_MB:-81000}"
     MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
     TP_SIZE="${TP_SIZE:-4}"
     MAX_LEN="${MAX_LEN:-65536}"
     GPU_UTIL="${GPU_UTIL:-0.95}"
-    # 149 GiB model + 50 GiB buffer. 400 GB filter eliminates most A100 hosts.
+    # 149 GiB model + 50 GiB buffer.
     DISK_GB="${DISK_GB:-200}"
     ;;
   opus)
