@@ -124,32 +124,61 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 if [ -z "$INSTANCE_ID" ]; then
-  # Filter for Vast Secure Cloud (datacenter: true) — ISO 27001, Tier 3/4,
-  # BAA-eligible. The plain `verified` flag only means "host passes basic
-  # reliability checks" and is NOT a compliance attestation — never use it
-  # as a substitute. Also use eq (not gte) on num_gpus — Vast rents the
-  # whole physical host, so an "8-GPU offer" charges for all 8 even if our
-  # TP only needs 4. cuda_max_good must be >= container CUDA (vllm/vllm-
-  # openai:latest currently 12.8+); consumer Ada has no CUDA forward-compat.
-  SEARCH=$(jq -nc \
-    --arg gpu "$GPU_NAME" \
-    --argjson nGpus "$NUM_GPUS" \
-    --argjson ram "$GPU_RAM_MB" \
-    --argjson disk "$DISK_GB" \
-    '{
-      datacenter: {eq: true},
-      rentable: {eq: true},
-      gpu_name: {eq: $gpu},
-      num_gpus: {eq: $nGpus},
-      gpu_ram: {gte: $ram},
-      direct_port_count: {gte: 1},
-      disk_space: {gte: $disk},
-      inet_down: {gte: 500},
-      cuda_max_good: {gte: 13.0},
-      type: "on-demand",
-      order: [["dph_total", "asc"]],
-      limit: 5
-    }')
+  # Filter tier:
+  #  - Default: datacenter: true → Vast Secure Cloud (ISO 27001 / Tier 3-4,
+  #    BAA-eligible). This is what the project's ZDR/HIPAA story rides on.
+  #  - VAST_ALLOW_MARKETPLACE=1 → verified: true → broader marketplace
+  #    (still passes Vast's basic reliability check, but the host operator
+  #    is an individual/residential, not an attested datacenter). Use this
+  #    only when SC inventory is dry and you accept the ZDR downgrade for
+  #    that workload.
+  # Plain `verified` is NOT a compliance attestation — never use it as a
+  # substitute for the SC posture in production.
+  # eq (not gte) on num_gpus — Vast rents the whole physical host.
+  # cuda_max_good: 13.0 for default (matches our 12.8+ container, consumer
+  # Ada has no CUDA forward-compat). Datacenter cards (A100/H100) support
+  # forward-compat so the marketplace path can relax to 12.4 if needed.
+  if [ "${VAST_ALLOW_MARKETPLACE:-0}" = "1" ]; then
+    echo "  ⚠ VAST_ALLOW_MARKETPLACE=1 — accepting any rentable host (ZDR posture downgraded)"
+    SEARCH=$(jq -nc \
+      --arg gpu "$GPU_NAME" \
+      --argjson nGpus "$NUM_GPUS" \
+      --argjson ram "$GPU_RAM_MB" \
+      --argjson disk "$DISK_GB" \
+      '{
+        rentable: {eq: true},
+        gpu_name: {eq: $gpu},
+        num_gpus: {eq: $nGpus},
+        gpu_ram: {gte: $ram},
+        direct_port_count: {gte: 1},
+        disk_space: {gte: $disk},
+        inet_down: {gte: 500},
+        cuda_max_good: {gte: 12.4},
+        type: "on-demand",
+        order: [["dph_total", "asc"]],
+        limit: 5
+      }')
+  else
+    SEARCH=$(jq -nc \
+      --arg gpu "$GPU_NAME" \
+      --argjson nGpus "$NUM_GPUS" \
+      --argjson ram "$GPU_RAM_MB" \
+      --argjson disk "$DISK_GB" \
+      '{
+        datacenter: {eq: true},
+        rentable: {eq: true},
+        gpu_name: {eq: $gpu},
+        num_gpus: {eq: $nGpus},
+        gpu_ram: {gte: $ram},
+        direct_port_count: {gte: 1},
+        disk_space: {gte: $disk},
+        inet_down: {gte: 500},
+        cuda_max_good: {gte: 13.0},
+        type: "on-demand",
+        order: [["dph_total", "asc"]],
+        limit: 5
+      }')
+  fi
   R=$(vast POST "/bundles/" "$SEARCH")
   OFFER_ID=$(echo "$R" | jq -r '.offers[0].id // empty')
   OFFER_PRICE=$(echo "$R" | jq -r '.offers[0].dph_total // empty')

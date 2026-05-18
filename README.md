@@ -213,7 +213,8 @@ Field-tested gotchas baked into the scripts as comments + filters; for users of 
 - **`runpod/worker-v1-vllm` has no `:stable` or `:latest` tag.** Only versioned tags (`:v2.18.1` etc.). `:stable` silently stalls worker initialization forever. `deploy-serverless.sh` pins to a known good version.
 - **RunPod's `Restricted` API-key scope returns 403 on `/v2/<id>/openai/v1`.** Pick **All** scope for serverless inference — basic pod management would otherwise work but the inference path won't.
 - **Plain HTTP transport on Vast.** Vast direct-port-forwarding gives `http://<host>:<port>`, not HTTPS. The bearer token in `.vllm-key.<profile>-vast` is the only thing keeping the endpoint private. Adequate for personal coding given the bearer; for full TLS, run a Caddy/Cloudflared sidecar. Filed as a future improvement.
-- **Vast Serverless** exists at https://docs.vast.ai/guides/serverless but isn't wired in this repo yet. Same ZDR question applies — would need the Secure Cloud worker pool filter. Tracked.
+- **Some multi-GPU Vast hosts have a broken CDI runtime.** A subset of Vast Secure Cloud hosts (seen on Japan A100 SXM4 and Texas Blackwell PRO 6000 S) fail container creation with `OCI runtime create failed: failed to inject CDI devices: unresolvable CDI devices`. The host's NVIDIA Container Toolkit can't pass GPUs through. Tear down and pick a different operator; the bug is per-host, not provider-wide.
+- **Vast Serverless** exists at https://docs.vast.ai/guides/serverless but isn't wired in this repo yet. Their model is Python-SDK + `@app.remote()` handlers (different from the shell-script container model), not a thin flag on top of pods. Tracked as a follow-up PR.
 
 ## How `zdr-coder` compares to similar projects
 
