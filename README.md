@@ -86,6 +86,30 @@ For HIPAA: both providers offer BAA-eligible Secure Cloud.
 - **RunPod**: email `support@runpod.io` — 1–2 business days, no Enterprise contract required.
 - **Vast.ai**: BAAs are available for qualifying customers on the Secure Cloud tier; request via their account portal.
 
+## Quickstart — resume after a break
+
+If you've used this repo before (keys/state preserved in `.env` and `.litellm-key`), one command per tier:
+
+```bash
+# haiku-tier: $0.30–0.67/hr (RTX 4090, 32B coder model)
+VAST_ALLOW_MARKETPLACE=1 MAX_LEN=16384 ./scripts/deploy-vast.sh haiku
+
+# sonnet-tier: $5.87–$11.42/hr (4× H100 SXM, DeepSeek V4 Flash 158B FP8)
+VAST_ALLOW_MARKETPLACE=1 ./scripts/deploy-vast.sh sonnet
+
+# point Cline at http://localhost:4000/v1 with API key from `cat .litellm-key`
+# Model ID = haiku-vast or sonnet-vast — switch mid-session
+
+# end of day:
+./scripts/destroy.sh all
+```
+
+That deploys, validates with a smoke test, recreates LiteLLM, and prints the Cline config. Cold-start is ~15 min the first deploy of the day (image pull + model download). Stop everything cleanly with `./scripts/destroy.sh all` — verify with `curl -sS https://console.vast.ai/api/v0/instances/ -H "Authorization: Bearer $VAST_API_KEY" | jq '.instances | length'` (should return 0).
+
+**Verified end-to-end as of this commit**: `haiku-vast` (RTX 4090) and `sonnet-vast` (4× H100 SXM, US marketplace host). The flags `VAST_ALLOW_MARKETPLACE=1` and `MAX_LEN=16384` for haiku are required today — Vast's Secure Cloud (datacenter:true) 4-GPU 80GB tier is too thin for sonnet/opus, and the default 4K context is too tight for Cline's system prompt. Drop them if SC capacity returns.
+
+For opus you'll want to use `./scripts/vol-up.sh opus` first (one-time ~$6 to pre-populate the 554 GiB Kimi K2.6 weights onto a persistent volume), then `./scripts/deploy-vast.sh opus` for the actual session — see [Persistent model cache](#persistent-model-cache-volumes--opus-economics) below.
+
 ## Setup
 
 ### 1. Install prerequisites — one command
