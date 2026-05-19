@@ -222,6 +222,20 @@ Parallel cold-start, ~15-20 min wall time vs serial:
 
 Each deploy is independent — separate bearer token, separate model alias in LiteLLM. All share `http://localhost:4000`. Switch in Cline by changing the **Model ID**.
 
+### Using Cline from a remote SSH host (VSCodium Remote-SSH, Tailscale SSH, etc.)
+
+If your VSCodium runs on a Mac but you're connected via Remote-SSH to a Linux box, Cline runs in the remote extension host — so its `localhost:4000` means the remote machine, not your Mac. LiteLLM stays on the Mac (keeps your provider API keys local); we tunnel port 4000 back over the SSH session you're already opening:
+
+```bash
+./scripts/tunnel.sh init <ssh-host>     # adds RemoteForward 4000 to ~/.ssh/config
+./scripts/tunnel.sh deinit <ssh-host>   # removes it
+./scripts/tunnel.sh status              # shows configured hosts
+```
+
+After `init`, reconnect any open Remote-SSH window (close → reopen). Cline's Base URL stays `http://localhost:4000/v1` — it's now forwarded back to your Mac. No tailnet ACL changes, no extra listeners exposed on your Mac, encrypted by the same SSH transport you're already using.
+
+If your tailnet ACL *does* allow remote → Mac (uncommon for tagged-devices → user setups), there's also an opt-in `docker-compose.tailscale.yml` that adds a Tailscale-interface binding — see comments in that file.
+
 ### Persistent model cache (opus economics)
 
 Avoid re-downloading the 554 GiB Kimi K2.6 weights every day:

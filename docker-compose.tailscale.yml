@@ -1,0 +1,22 @@
+# docker-compose override that adds a Tailscale-interface binding to the LiteLLM
+# proxy, so a remote Cline host on the same tailnet (e.g. VSCodium SSH-remote
+# to a Linux box) can reach localhost:4000 via the tailnet directly — no SSH
+# reverse-tunnel needed.
+#
+# Usage:
+#   TAILSCALE_IP=$(tailscale ip -4) docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#
+# Or persistent — drop the IP in your shell rc, or export TAILSCALE_IP in .env
+# (compose substitutes from the shell env at parse time).
+#
+# Coexists cleanly with the loopback bindings in docker-compose.yml — those
+# stay listening on 127.0.0.1 + ::1 for local-on-Mac Cline. This file only
+# ADDS the tailnet binding on a different interface.
+#
+# Security: LiteLLM bearer auth (.litellm-key) is still required. Restrict who
+# can reach port 4000 via your Tailscale ACL if your tailnet is shared.
+
+services:
+  litellm:
+    ports:
+      - "${TAILSCALE_IP}:4000:4000"
