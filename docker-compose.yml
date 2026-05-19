@@ -9,12 +9,15 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
-    # Both per-profile API_BASE/_KEY vars AND LITELLM_MASTER_KEY come from
-    # .env-runtime, written by the deploy scripts. This makes container
-    # recreates (force-recreate after add/remove profile) self-sufficient —
-    # no need to remember `export LITELLM_MASTER_KEY` in every caller.
+    # Per-profile API_BASE/_KEY vars + LITELLM_MASTER_KEY come from .env-runtime
+    # (written by deploy scripts). Provider API keys like GROQ_API_KEY come
+    # from .env directly (no deploy step — keys persist for the lifetime of
+    # the account). Compose merges both; .env-runtime wins on conflict.
     env_file:
-      - .env-runtime
+      - path: .env
+        required: false
+      - path: .env-runtime
+        required: false
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command:

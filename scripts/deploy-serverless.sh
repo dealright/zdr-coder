@@ -5,15 +5,17 @@
 # actual inference instead of per-hour of an always-on pod.
 #
 # Usage:  ./scripts/deploy-serverless.sh haiku
-# Only haiku is wired today — the 32B-AWQ on 24GB pools is the cheapest tier
-# and the most obvious win for bursty use.
+#         ./scripts/deploy-serverless.sh sonnet
+#
+# haiku  → 32B-AWQ on 24/32/48GB pools (cheapest, bursty use)
+# sonnet → DeepSeek V4 Flash FP8 on 4× H100 80GB (needs Hopper for FP8)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROFILE="${1:-haiku}"
-case "$PROFILE" in haiku) ;; *)
-  echo "FAIL: only 'haiku' is wired for serverless today (got '$PROFILE')." >&2
+case "$PROFILE" in haiku|sonnet) ;; *)
+  echo "FAIL: unknown profile '$PROFILE'. Use: haiku | sonnet" >&2
   exit 1
 esac
 
@@ -59,6 +61,25 @@ case "$PROFILE" in
     # 18 GiB model + ~10 GiB worker image + HF cache during cold-start download.
     # 30 GiB is too tight and silently stalls initialization. 60 GiB is safe.
     CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-60}"
+    GPU_COUNT="${GPU_COUNT:-1}"
+    ;;
+  sonnet)
+    # DeepSeek V4 Flash FP8 (~149 GiB weights) needs Hopper or Blackwell for
+    # FP8 kernels — Ampere A100 has no FP8 hardware. RunPod serverless does
+    # NOT expose H100 80GB as a pool (verified May 2026). Valid FP8-capable
+    # pools: HOPPER_141 (H200 141GB), BLACKWELL_96 (B200 96GB), BLACKWELL_180.
+    # Default to 2× H200 = 282 GiB → ~133 GiB free for KV at MAX_LEN=65536.
+    WORKER_IMAGE="${WORKER_IMAGE:-runpod/worker-v1-vllm:v2.18.1}"
+    MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
+    GPU_IDS="${GPU_IDS:-HOPPER_141,BLACKWELL_180}"
+    GPU_COUNT="${GPU_COUNT:-2}"
+    MAX_LEN="${MAX_LEN:-65536}"
+    GPU_UTIL="${GPU_UTIL:-0.92}"
+    QUANTIZATION="${QUANTIZATION:-fp8}"
+    TP_SIZE="${TP_SIZE:-2}"
+    # 149 GiB weights + ~10 GiB worker + HF cache slack. 250 GiB is the safe
+    # minimum; the cold-start download stalls below that.
+    CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-250}"
     ;;
 esac
 
@@ -133,10 +154,11 @@ if [ -z "$ENDPOINT_ID" ]; then
     --arg name "$ENDPOINT_NAME" \
     --arg tid "$TEMPLATE_ID" \
     --arg gpu "$GPU_IDS" \
+    --argjson gpuCount "$GPU_COUNT" \
     '{ input: {
-      name: $name, templateId: $tid, gpuIds: $gpu,
+      name: $name, templateId: $tid, gpuIds: $gpu, gpuCount: $gpuCount,
       workersMin: 0, workersMax: 1,
-      idleTimeout: 5, executionTimeoutMs: 300000,
+      idleTimeout: 5, executionTimeoutMs: 600000,
       scalerType: "QUEUE_DELAY", scalerValue: 4
     } }')
   R=$(gql 'mutation($input: EndpointInput!){ saveEndpoint(input: $input) { id name } }' "$ENDPOINT_VARS")

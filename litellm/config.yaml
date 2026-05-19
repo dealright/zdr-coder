@@ -23,6 +23,15 @@ model_list:
       api_base: os.environ/HAIKU_SERVERLESS_API_BASE
       api_key: os.environ/HAIKU_SERVERLESS_API_KEY
 
+  # DeepSeek V4 Flash on RunPod Serverless — 4× H100 80GB per worker, scales
+  # to zero. Cold start is ~5-10 min on first request (149 GiB FP8 download).
+  # Provisioned by scripts/deploy-serverless.sh sonnet.
+  - model_name: sonnet-serverless
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-V4-Flash
+      api_base: os.environ/SONNET_SERVERLESS_API_BASE
+      api_key: os.environ/SONNET_SERVERLESS_API_KEY
+
   # Same models as haiku/sonnet/opus but served on Vast.ai (marketplace of
   # datacenter + consumer GPUs). Significantly cheaper than RunPod across all
   # tiers and far more on-demand capacity. Provisioned by deploy-vast.sh.
@@ -57,6 +66,20 @@ model_list:
       model: openai/moonshotai/Kimi-K2.6
       api_base: os.environ/OPUS_API_BASE
       api_key: os.environ/OPUS_API_KEY
+
+  # ── API mode (ZDR via provider policy, scale-to-zero by definition) ──
+  # Groq Cloud — SOC 2 Type 2, ISO 27001, HIPAA BAA; ZDR is a self-serve
+  # toggle in console (Data Controls). LPU inference at 300+ tok/s. No api_base
+  # needed — LiteLLM has native Groq routing.
+  - model_name: haiku-api
+    litellm_params:
+      model: groq/llama-3.1-8b-instant
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: sonnet-api
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
 
   # Back-compat aliases: heavy/plan → sonnet
   - model_name: heavy

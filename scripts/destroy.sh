@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tear down one profile or all.
-# Usage: ./scripts/destroy.sh [haiku|sonnet|opus|haiku-serverless|haiku-vast|sonnet-vast|opus-vast|all]
+# Usage: ./scripts/destroy.sh [haiku|sonnet|opus|haiku-serverless|sonnet-serverless|haiku-vast|sonnet-vast|opus-vast|api|all]
 # Default: all.
 
 set -uo pipefail
@@ -100,6 +100,7 @@ case "$PROFILE" in
     terminate_pod sonnet
     terminate_pod opus
     terminate_serverless haiku-serverless
+    terminate_serverless sonnet-serverless
     terminate_vast haiku-vast
     terminate_vast sonnet-vast
     terminate_vast opus-vast
@@ -116,7 +117,7 @@ case "$PROFILE" in
       echo "  ✓ No profiles left — LiteLLM stopped"
     fi
     ;;
-  haiku-serverless)
+  haiku-serverless|sonnet-serverless)
     terminate_serverless "$PROFILE"
     if [ -f .env-runtime ] && [ -s .env-runtime ]; then
       docker compose up -d --force-recreate litellm >/dev/null 2>&1 || true
@@ -125,6 +126,18 @@ case "$PROFILE" in
       docker compose down
       echo "  ✓ No profiles left — LiteLLM stopped"
     fi
+    ;;
+  api)
+    # API mode has no remote resource to tear down. Just stop LiteLLM if no
+    # other profiles are active. GROQ_API_KEY stays in .env for next session.
+    if [ -f .env-runtime ]; then
+      grep -vE '^(LITELLM_MASTER_KEY=)$' .env-runtime > .env-runtime.tmp || true
+      # If only LITELLM_MASTER_KEY remains, treat as empty
+      [ -s .env-runtime.tmp ] && grep -v '^LITELLM_MASTER_KEY=' .env-runtime.tmp >/dev/null 2>&1 || true
+      mv .env-runtime.tmp .env-runtime 2>/dev/null || true
+    fi
+    docker compose down
+    echo "  ✓ LiteLLM stopped (API keys in .env preserved)"
     ;;
   haiku-vast|sonnet-vast|opus-vast)
     terminate_vast "$PROFILE"
@@ -137,7 +150,7 @@ case "$PROFILE" in
     fi
     ;;
   *)
-    echo "Usage: $0 [all|haiku|sonnet|opus|haiku-serverless|haiku-vast|sonnet-vast|opus-vast]" >&2
+    echo "Usage: $0 [all|haiku|sonnet|opus|haiku-serverless|sonnet-serverless|haiku-vast|sonnet-vast|opus-vast|api]" >&2
     exit 1
     ;;
 esac
