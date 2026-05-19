@@ -7,8 +7,14 @@ services:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: zdr-litellm
     restart: unless-stopped
+    # Bind both IPv4 and IPv6 loopback. Docker only forwards the interface(s)
+    # you list — `127.0.0.1:4000:4000` alone leaves IPv6 ::1 unbound. Node.js
+    # 18+ (the runtime Cline uses) often resolves `localhost` to IPv6 first,
+    # so a single-stack v4 binding causes "Connection error" from Cline even
+    # though curl works fine.
     ports:
       - "127.0.0.1:4000:4000"
+      - "[::1]:4000:4000"
     # Per-profile API_BASE/_KEY vars + LITELLM_MASTER_KEY come from .env-runtime
     # (written by deploy scripts). Provider API keys like GROQ_API_KEY come
     # from .env directly (no deploy step — keys persist for the lifetime of
