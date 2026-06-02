@@ -33,12 +33,17 @@ fi
 
 MODEL="${ZDR_MODEL:-sonnet-api}"
 WORKSPACE="${WORKSPACE:-$(cd .. && pwd)}"
-OPENHANDS_VERSION="${OPENHANDS_VERSION:-0.40}"
+# OpenHands versioning: app is at docker.openhands.dev/openhands/openhands:<v>;
+# the sandbox "agent-server" runtime image is at ghcr.io/openhands/agent-server
+# and is pinned separately. Bump these together when upgrading.
+OPENHANDS_VERSION="${OPENHANDS_VERSION:-1.7}"
+AGENT_SERVER_TAG="${AGENT_SERVER_TAG:-1.19.1-python}"
 
 echo "═ Starting OpenHands"
-echo "  Model:     $MODEL  (via LiteLLM → Groq/Vast)"
-echo "  Workspace: $WORKSPACE"
-echo "  Version:   $OPENHANDS_VERSION"
+echo "  App version:    $OPENHANDS_VERSION"
+echo "  Agent server:   $AGENT_SERVER_TAG"
+echo "  Model:          $MODEL  (via LiteLLM → Groq/Vast)"
+echo "  Workspace:      $WORKSPACE"
 echo
 
 # Stop any existing instance so a re-run is idempotent
@@ -49,16 +54,17 @@ docker rm -f openhands-app 2>/dev/null || true
 docker run -d --pull=always \
   --name openhands-app \
   -p 3000:3000 \
-  -e SANDBOX_RUNTIME_CONTAINER_IMAGE="ghcr.io/openhands/runtime:${OPENHANDS_VERSION}-nikolaik" \
+  -e AGENT_SERVER_IMAGE_REPOSITORY=ghcr.io/openhands/agent-server \
+  -e AGENT_SERVER_IMAGE_TAG="$AGENT_SERVER_TAG" \
   -e LLM_API_BASE="http://host.docker.internal:4000/v1" \
   -e LLM_API_KEY="$KEY" \
   -e LLM_MODEL="openai/${MODEL}" \
   -e LOG_ALL_EVENTS=true \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$HOME/.openhands-state:/.openhands-state" \
+  -v "$HOME/.openhands:/.openhands" \
   -v "$WORKSPACE:/workspace" \
   --add-host host.docker.internal:host-gateway \
-  "ghcr.io/openhands/openhands:${OPENHANDS_VERSION}"
+  "docker.openhands.dev/openhands/openhands:${OPENHANDS_VERSION}"
 
 # Wait for OpenHands to bind :3000 (typically <30s)
 echo -n "  starting"
