@@ -49,7 +49,7 @@ docker rm -f openhands-app 2>/dev/null || true
 docker run -d --pull=always \
   --name openhands-app \
   -p 3000:3000 \
-  -e SANDBOX_RUNTIME_CONTAINER_IMAGE="docker.all-hands.dev/all-hands-ai/runtime:${OPENHANDS_VERSION}-nikolaik" \
+  -e SANDBOX_RUNTIME_CONTAINER_IMAGE="ghcr.io/openhands/runtime:${OPENHANDS_VERSION}-nikolaik" \
   -e LLM_API_BASE="http://host.docker.internal:4000/v1" \
   -e LLM_API_KEY="$KEY" \
   -e LLM_MODEL="openai/${MODEL}" \
@@ -58,7 +58,7 @@ docker run -d --pull=always \
   -v "$HOME/.openhands-state:/.openhands-state" \
   -v "$WORKSPACE:/workspace" \
   --add-host host.docker.internal:host-gateway \
-  "docker.all-hands.dev/all-hands-ai/openhands:${OPENHANDS_VERSION}"
+  "ghcr.io/openhands/openhands:${OPENHANDS_VERSION}"
 
 # Wait for OpenHands to bind :3000 (typically <30s)
 echo -n "  starting"
