@@ -25,9 +25,9 @@ There are six levels of "how private is my AI." This repo gives you ⭐ levels 3
 | **1. Lowest** | Free consumer chat — chatgpt.com, claude.ai free, gemini.google.com | $0 | Yes, plaintext, sampled humans may read | ChatGPT & Gemini: **yes**. Claude: opt-in only. | ❌ never | ❌ free tier excluded | Throwaway questions |
 | **2. Moderate** | $20/mo consumer subs — ChatGPT Plus, Claude Pro, Gemini Advanced | ~$20/mo | Yes, plaintext, sampled humans may read | ChatGPT Plus & Gemini Advanced: **yes**. Claude Pro: opt-in (toggle in settings). | ❌ Plus / Pro / Advanced **explicitly ineligible** | ❌ consumer tier excluded | Personal coding, nothing sensitive |
 | **3. High** ⭐ *this repo: `*-api` routes* | Developer APIs with ZDR option — **Groq**, OpenAI API, Anthropic API, DeepInfra | $0.13–$4.50/hr active, **$0 idle** | Yes, plaintext, no human review under contract | ❌ contractually no | ✅ on request | SOC 2 Type 2, ISO 27001 (Groq) | Most use. Sensible default. |
-| **4. Very high** | Enterprise cloud LLM APIs — AWS Bedrock, Azure OpenAI Foundry, GCP Vertex | $3–$15 / million tokens | Yes, plaintext, cloud-vendor enforced no-access | ❌ contractually no | ✅ standard, no contract minimum | SOC 2, ISO 27001, **FedRAMP**, **HITRUST** | Regulated industries with audit obligations |
+| **4. Very high** | Enterprise cloud LLM APIs — **AWS Bedrock** (Anthropic Claude via Bedrock), **Azure OpenAI Foundry**, **GCP Vertex AI** | $3–$15 / million tokens (consumption-only, **no contract minimum**) | Yes, plaintext, cloud-vendor enforced no-access | ❌ contractually no | ✅ standard (Bedrock + Azure + GCP all have BAA in their default agreements) | SOC 2 Type 2, ISO 27001/27017/27018, **FedRAMP Moderate** (commercial) / **High** (GovCloud / Assured Workloads), **HITRUST CSF** | Regulated industries with audit obligations — HIPAA + FedRAMP/HITRUST required |
 | **5. Maximum** | TEE-attested confidential inference — Tinfoil, GCP H100 CC mode | $5–$50/hr active or per-token | ❌ **cryptographically blind** — hardware-attested | ❌ enforced by hardware | ✅ via Tinfoil | Tinfoil: SOC 2 only. GCP: full stack | National security, ultra-paranoid PHI |
-| **6. Own everything** ⭐ *this repo: `*-vast`, `*-serverless` routes* | Self-host open-weights on rented GPU — **Vast Secure Cloud**, **RunPod Secure Cloud** | $0.40–$15/hr (pod) or $0 idle (serverless) | Only the datacenter host operator's root user; contractually prohibited from introspecting (RunPod explicit, Vast implicit) | ❌ you control the model weights | ✅ via datacenter operator BAA | SOC 2 Type 2 (Vast, RunPod); ISO 27001 via DC partners | Long sessions, full audit trail, no managed-model provider in the path |
+| **6. Own everything** ⭐ *this repo: `*-vast`, `*-serverless` routes* | Self-host open-weights on rented GPU. **Three sub-tiers by compliance ceiling**: (a) **Vast Secure Cloud** / **RunPod Secure Cloud** — cheapest BAA-eligible; (b) **AWS EC2 p5e/p5en** (8× H200) — FedRAMP/HITRUST inheritance, much pricier; (c) Azure/GCP equivalents — similar to AWS | (a) **$0.40–$15/hr** Vast/RunPod pods, $0 idle serverless; (b) **$39.80–$52.02/hr** AWS p5e/p5en | Only the datacenter host operator's root user; contractually prohibited from introspecting (RunPod explicit, Vast implicit; AWS strongest) | ❌ you control the model weights | ✅ via datacenter operator BAA (all three) | (a) SOC 2 Type 2 platform, ISO 27001 via DC partners; (b) **full AWS stack — SOC 2, ISO 27001, FedRAMP, HITRUST inherited** | Long sessions, full audit trail, no managed-model provider in the path. AWS sub-tier when FedRAMP/HITRUST required. |
 
 A few non-obvious things from the research:
 
@@ -95,18 +95,46 @@ Done. Start coding.
 
 ## Available model IDs
 
-| Model ID | What runs | Where | Tier (model size) |
-|---|---|---|---|
-| `haiku-api` | Llama 3.1 8B Instant | Groq Cloud | Level 3, small |
-| `sonnet-api` | Llama 3.3 70B Versatile | Groq Cloud | Level 3, medium |
-| `haiku-vast` | Qwen2.5-Coder-32B-AWQ | Vast Secure Cloud pod | Level 6, small |
-| `sonnet-vast` | DeepSeek V4 Flash (FP8) | Vast Secure Cloud pod | Level 6, medium |
-| `opus-vast` | Kimi K2.6 (1T params) | Vast Secure Cloud pod | Level 6, frontier |
-| `haiku-serverless` | Qwen2.5-Coder-32B-AWQ | RunPod Serverless | Level 6, small, scale-to-zero |
-| `sonnet-serverless` | DeepSeek V4 Flash (FP8) | RunPod Serverless | Level 6, medium, scale-to-zero |
-| `haiku` / `sonnet` / `opus` | Same as `-vast` | RunPod always-on pod | Level 6, original path |
+| Model ID | What runs | Where | Tier mapping | Notes |
+|---|---|---|---|---|
+| `haiku-api` | Llama 3.1 8B Instant *(or GPT-OSS 20B — see below)* | Groq Cloud | Level 3, ~Haiku-class | $0.05–$0.10/hr active |
+| `sonnet-api` | Llama 3.3 70B Versatile *(or GPT-OSS 120B — see below)* | Groq Cloud | Level 3, ~Sonnet-ish | $0.20–$0.56/hr active |
+| `haiku-vast` | Qwen2.5-Coder-32B-AWQ (18GB INT4) | Vast Secure Cloud pod | Level 6, ~Haiku-class | $0.40–0.67/hr while up |
+| `sonnet-vast` | DeepSeek V4 Flash (158B FP8, 149GB weights) | Vast Secure Cloud pod | Level 6, **~Sonnet-class** | $5.87/hr while up |
+| `opus-vast` | Kimi K2.6 (1T params, 554GB weights) | Vast Secure Cloud pod | Level 6, ~Opus-class | $7.74–$11.74/hr while up |
+| `haiku-serverless` | Qwen2.5-Coder-32B-AWQ | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$0.50/hr active |
+| `sonnet-serverless` | DeepSeek V4 Flash | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$6/hr active (H200, capacity-dependent) |
+| `haiku` / `sonnet` / `opus` | Same as `-vast` | RunPod always-on pod | Level 6, alt provider | Usually more expensive than Vast |
 
-Switching is instant — just change the field in Cline and send.
+Switching is instant — just change the field in Aider (`ZDR_MODEL=...`) or Cline (Model ID).
+
+### Honest tier mapping — does "sonnet-api" really match Sonnet?
+
+Short answer: **no, the API-tier models are aspirational labels, not benchmark-equivalent.** Two specific corrections worth knowing:
+
+- **`sonnet-api` on Llama 3.3 70B** — comparable to Sonnet 3.5 for general reasoning but **noticeably weaker for agentic coding** (Aider edit-block format, multi-file refactors). At ~$0.56/hr active.
+- **`sonnet-api` on GPT-OSS 120B** *(the better pick, May 2026)* — OpenAI's open-weight reasoning model. Tool-use and coding-tuned. **About 3× cheaper than Llama 3.3 70B ($0.20/hr vs $0.56/hr) and meaningfully better at agentic loops.** Same `sonnet-api` alias if you update `litellm/config.yaml`.
+
+For true Sonnet-equivalent agentic coding under ZDR, the realistic options are:
+
+| Want | Best ZDR-eligible route | Real cost |
+|---|---|---|
+| Best ZDR + Sonnet-quality coding (today) | `sonnet-vast` (DeepSeek V4 Flash on Vast pod) | $5.87/hr while up, $0 down |
+| Best ZDR + scale-to-zero + "good-enough" coding | `sonnet-api` switched to GPT-OSS 120B | $0.20/hr active, $0 idle |
+| Best ZDR + Opus-quality (frontier) coding | `opus-vast` (Kimi K2.6 on Vast 8× H100) | $11.74/hr while up |
+
+There is **no Groq-API equivalent for Opus-tier** — Groq's production catalog tops out at GPT-OSS 120B, which is between Sonnet and Opus on capability. Opus-class needs either self-hosting (Level 6 below) or a different API provider that hosts DeepSeek V4 Pro / Kimi K2.6 (none with self-serve ZDR as of May 2026).
+
+### Current Groq production catalog (May 2026)
+
+| Groq model | Tok/s | $/M in | $/M out | Closest Claude | Use as |
+|---|---|---|---|---|---|
+| Llama 3.1 8B Instant | 560 | $0.05 | $0.08 | Haiku-ish | current `haiku-api` |
+| **GPT-OSS 20B** | 1000 | $0.075 | $0.30 | Haiku-class, coding-tuned | **better `haiku-api`** |
+| Llama 3.3 70B Versatile | 280 | $0.59 | $0.79 | Sonnet 3.5-ish | current `sonnet-api` |
+| **GPT-OSS 120B** | 500 | $0.15 | $0.60 | Sonnet 4-ish, coding-tuned | **better `sonnet-api`** |
+
+DeepSeek V3/V4 are *preview-only* on Groq today — excluded from the BAA per BAA §1.1 (Covered Cloud Services excludes preview tier). For DeepSeek under ZDR you need self-hosted (Level 6) or a different API provider.
 
 ## Compliance posture
 
@@ -173,14 +201,42 @@ Rule of thumb: **<2 hrs/day → Level 3 API.** **>4 hrs/day → Level 6 pod.** *
 
 Always-on pod pricing for each tier (from current available on-demand offers):
 
-| Tier | RunPod Secure $/hr | Vast Secure Cloud $/hr | Notes |
-|---|---|---|---|
-| haiku (1× RTX 4090 24GB) | $0.69 | **$0.40–0.67** | Vast cheapest when Iceland host rentable |
-| sonnet (4× A100 / 4× H100 80GB) | $5.96 (often sold out) | **$4.27** (A100) or **$5.87** (H100 SXM) | Vast supply thin, 1–2 hosts at a time |
-| opus (8× H100 SXM 80GB) | $23.92 (often sold out) | **$11.74** | France datacenter when listed |
-| opus *(alt)* 4× H200 140GB | — | **$7.74** | 560 GiB > Kimi K2.6's 554 GiB weights |
+| Tier | RunPod Secure $/hr | Vast Secure Cloud $/hr | AWS EC2 $/hr | Notes |
+|---|---|---|---|---|
+| haiku (1× RTX 4090 24GB) | $0.69 | **$0.40–0.67** | n/a — AWS doesn't rent 4090s | Vast cheapest when Iceland host rentable |
+| sonnet (4× A100 / 4× H100 80GB) | $5.96 (often sold out) | **$4.27** (A100) or **$5.87** (H100 SXM) | $32–40 (p4de / p5) | Vast supply thin, 1–2 hosts at a time; AWS p5 even thinner |
+| opus (8× H100 SXM 80GB) | $23.92 (often sold out) | **$11.74** | $50–98 (p5.48xlarge) | France datacenter when listed |
+| opus *(alt)* 4× H200 140GB | — | **$7.74** | — | 560 GiB > Kimi K2.6's 554 GiB weights |
+| opus *(frontier — DeepSeek V4 Pro)* | — | — | **$39.80–$52.02** (p5e.48xlarge / p5en.48xlarge 8× H200) | See "DeepSeek V4 Pro" section below |
 
 Versus going Anthropic-direct (no self-hosting): ~$30/hr for Opus-class agentic-coding workload. Crossover for opus is **~1.5 hrs/day** before self-hosted wins on cost.
+
+### DeepSeek V4 Pro on AWS (Level 6 + L4-tier compliance) — capacity warning
+
+**DeepSeek V4 Pro is the open-weights model closest to Claude Opus 4.7** — 1.6T params MoE, ~49B active per token, 80.6% on SWE-bench. Weights ~864 GB. Doesn't fit on 8× H100 80GB (640 GB total < 864 GB); minimum viable host is **8× H200 141GB = 1,128 GB single node**, or 16× H100 across 2 nodes with NVLink+InfiniBand.
+
+AWS EC2 instances that fit it (verified May 2026):
+
+| Instance | Spec | US East (Ohio) $/hr | US West (N. California) $/hr | Availability |
+|---|---|---|---|---|
+| **p5e.48xlarge** | 8× H200, Sapphire Rapids CPU, 1,128 GiB HBM3e | **$39.80** (was $34.61 pre-Jan 2026) | **$49.75** | **Tight** — AWS hiked 15% in Jan due to GPU demand |
+| **p5en.48xlarge** | 8× H200 + Gen5 PCIe (faster CPU↔GPU) | ~$42 estimated Ohio | **$52.02** | Tighter than p5e |
+
+**Honest realities for this path:**
+- **~$40/hr in Ohio is the floor for DeepSeek V4 Pro on AWS** — and US East has the best supply.
+- **Capacity is generally not on-demand** — you typically use **EC2 Capacity Blocks for ML** (pre-book 1–6 month windows in cluster sizes 1–64 instances). On-demand p5e/p5en availability is genuinely scarce in May 2026.
+- **Compliance inheritance is the reason to pick AWS over Vast** — AWS Bedrock-tier BAA + SOC 1/2/3 + ISO 27001/27017/27018 + FedRAMP Moderate (commercial) / High (GovCloud) + HITRUST CSF all inherit transitively to the EC2 instance you run vLLM on. Vast/RunPod can't match that audit story.
+- **Cost vs Anthropic Opus API:** Anthropic Opus 4.7 ≈ $30/hr typical agentic load. AWS DeepSeek V4 Pro ≈ $40/hr. The self-hosting math **does not work for opus-tier on AWS** at current prices — Vast at $7.74/hr (4× H200) is 5× cheaper if your compliance bar is BAA-only rather than FedRAMP/HITRUST.
+- **Capacity Block reservations** lock you into 1–6 months at a fixed rate. If your usage is <40 hrs/month, on-demand Vast wins on flexibility even at higher hourly.
+
+**When AWS Level 6 actually makes sense:**
+1. You need **FedRAMP / HITRUST inheritance** on the inference path itself (Vast/RunPod can't give you this).
+2. You have **predictable continuous workload** (>4 hrs/day, 5 days/week) to amortize a Capacity Block reservation.
+3. Your data-governance team requires AWS-tier vendor risk management — not just BAA paper.
+
+For most users, **`opus-vast` on Vast.ai 4× H200 at $7.74/hr remains the right call.** AWS H200 is the answer only when the compliance ceiling demands it.
+
+DeepSeek V4 Pro vs Claude Opus 4.7: Opus is still better at long-context coherence and tool-use consistency. V4 Pro is closer on raw reasoning benchmarks. For agentic coding specifically, Opus still edges it — but the gap is small enough that self-hosting V4 Pro is a real choice if compliance forces it.
 
 ## Setup detail
 
