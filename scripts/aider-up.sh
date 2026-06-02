@@ -46,13 +46,20 @@ fi
 pipx install aider-chat
 
 # pipx ensurepath modifies shell rc files; current session may not have
-# ~/.local/bin on PATH yet. Surface a hint if so.
+# ~/.local/bin on PATH yet. Symlink into /usr/local/bin if we have permission,
+# so future shells (including SSH non-interactive) find aider without any
+# rc-file dependency.
 if ! command -v aider >/dev/null 2>&1; then
-  echo
-  echo "⚠ aider is installed but not on PATH in this shell. Either:"
-  echo "    exec \$SHELL -l        # reload shell"
-  echo "  or"
-  echo "    ~/.local/bin/aider    # use the absolute path"
+  if [ -x "$HOME/.local/bin/aider" ]; then
+    if [ -w /usr/local/bin ] || [ "$(id -u)" -eq 0 ]; then
+      ln -sf "$HOME/.local/bin/aider" /usr/local/bin/aider
+      echo "  ✓ Symlinked $HOME/.local/bin/aider → /usr/local/bin/aider"
+    else
+      echo
+      echo "⚠ aider is at $HOME/.local/bin/aider but not on this shell's PATH."
+      echo "  Either start a fresh shell, or use the absolute path."
+    fi
+  fi
 fi
 
 echo
