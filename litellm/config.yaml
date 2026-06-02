@@ -71,14 +71,21 @@ model_list:
   # Groq Cloud — SOC 2 Type 2, ISO 27001, HIPAA BAA; ZDR is a self-serve
   # toggle in console (Data Controls). LPU inference at 300+ tok/s. No api_base
   # needed — LiteLLM has native Groq routing.
+  #
+  # GPT-OSS (OpenAI's open-weight reasoning models, released Aug 2025) is
+  # tool-use + coding tuned and ~3× cheaper than Llama 3.3 70B. As of May 2026
+  # it's the right pick for both tiers on Groq. See README "Honest tier mapping".
+  # NOTE: slug is `groq/gpt-oss-120b` not `groq/openai/gpt-oss-120b` —
+  # LiteLLM's provider parser breaks on the second slash and falls back to
+  # OpenAI direct (404). See https://github.com/BerriAI/litellm/issues/14807
   - model_name: haiku-api
     litellm_params:
-      model: groq/llama-3.1-8b-instant
+      model: groq/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
   - model_name: sonnet-api
     litellm_params:
-      model: groq/llama-3.3-70b-versatile
+      model: groq/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
   # Back-compat aliases: heavy/plan → sonnet

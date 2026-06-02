@@ -97,44 +97,52 @@ Done. Start coding.
 
 | Model ID | What runs | Where | Tier mapping | Notes |
 |---|---|---|---|---|
-| `haiku-api` | Llama 3.1 8B Instant *(or GPT-OSS 20B — see below)* | Groq Cloud | Level 3, ~Haiku-class | $0.05–$0.10/hr active |
-| `sonnet-api` | Llama 3.3 70B Versatile *(or GPT-OSS 120B — see below)* | Groq Cloud | Level 3, ~Sonnet-ish | $0.20–$0.56/hr active |
+| `haiku-api` | **GPT-OSS 20B** (OpenAI open-weight, coding-tuned) | Groq Cloud | Level 3, ~Haiku-class | $0.10/hr active, $0 idle |
+| `sonnet-api` | **GPT-OSS 120B** (OpenAI open-weight reasoning) | Groq Cloud | Level 3, ~Sonnet-ish | $0.20/hr active, $0 idle |
 | `haiku-vast` | Qwen2.5-Coder-32B-AWQ (18GB INT4) | Vast Secure Cloud pod | Level 6, ~Haiku-class | $0.40–0.67/hr while up |
 | `sonnet-vast` | DeepSeek V4 Flash (158B FP8, 149GB weights) | Vast Secure Cloud pod | Level 6, **~Sonnet-class** | $5.87/hr while up |
-| `opus-vast` | Kimi K2.6 (1T params, 554GB weights) | Vast Secure Cloud pod | Level 6, ~Opus-class | $7.74–$11.74/hr while up |
+| `opus-vast` | **Kimi K2.6** (1T params, 554GB weights) — **88.7% SWE-Bench, beats Opus 4.7** | Vast Secure Cloud pod | Level 6, **≥Opus 4.7 on SWE-Bench** | $7.74–$11.74/hr while up |
 | `haiku-serverless` | Qwen2.5-Coder-32B-AWQ | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$0.50/hr active |
 | `sonnet-serverless` | DeepSeek V4 Flash | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$6/hr active (H200, capacity-dependent) |
 | `haiku` / `sonnet` / `opus` | Same as `-vast` | RunPod always-on pod | Level 6, alt provider | Usually more expensive than Vast |
 
 Switching is instant — just change the field in Aider (`ZDR_MODEL=...`) or Cline (Model ID).
 
-### Honest tier mapping — does "sonnet-api" really match Sonnet?
+### Honest tier mapping — what actually matches each Claude tier?
 
-Short answer: **no, the API-tier models are aspirational labels, not benchmark-equivalent.** Two specific corrections worth knowing:
+The aliases (`haiku-api`, `sonnet-api`, `opus-vast`) are aspirational labels mapped to the best ZDR-eligible open-weights option for that compute shape. As of May 2026:
 
-- **`sonnet-api` on Llama 3.3 70B** — comparable to Sonnet 3.5 for general reasoning but **noticeably weaker for agentic coding** (Aider edit-block format, multi-file refactors). At ~$0.56/hr active.
-- **`sonnet-api` on GPT-OSS 120B** *(the better pick, May 2026)* — OpenAI's open-weight reasoning model. Tool-use and coding-tuned. **About 3× cheaper than Llama 3.3 70B ($0.20/hr vs $0.56/hr) and meaningfully better at agentic loops.** Same `sonnet-api` alias if you update `litellm/config.yaml`.
+| Want | ZDR-eligible route in this repo | Real cost | Honest performance vs Claude |
+|---|---|---|---|
+| Haiku-class, cheapest | `haiku-api` (GPT-OSS 20B on Groq) | $0.10/hr active, $0 idle | Comparable to Haiku for simple edits; coding-tuned |
+| Sonnet-ish, scale-to-zero | `sonnet-api` (GPT-OSS 120B on Groq) | $0.20/hr active, $0 idle | Between Sonnet 3.5 and Sonnet 4 for agentic loops; weaker on long-context multi-file work |
+| Sonnet-class, self-hosted | `sonnet-vast` (DeepSeek V4 Flash on Vast 4× H100) | $5.87/hr while up | Solid Sonnet-class; FP8 weights, 65K context |
+| **Opus-class (best open option)** | `opus-vast` (**Kimi K2.6** on Vast 8× H100 or 4× H200) | $7.74–$11.74/hr while up | **88.7% SWE-Bench vs Opus 4.7's 87.6% — Kimi K2.6 wins.** Trade Opus's edge on GPQA / long-context / tool orchestration for the strongest SWE-Bench open-weights score. |
 
-For true Sonnet-equivalent agentic coding under ZDR, the realistic options are:
+There is **no Groq-API equivalent for Opus-tier** — Groq's production catalog tops out at GPT-OSS 120B, which sits between Sonnet and Opus on capability. Opus-class under ZDR means self-hosting (`opus-vast`) — but the news is that **the open-weights champion (Kimi K2.6) actually beats Opus 4.7 on SWE-Bench Verified**. Detailed benchmarks in the [Opus-tier section below](#opus-tier-on-open-weights--kimi-k26-is-the-answer-not-deepseek-v4-pro).
 
-| Want | Best ZDR-eligible route | Real cost |
-|---|---|---|
-| Best ZDR + Sonnet-quality coding (today) | `sonnet-vast` (DeepSeek V4 Flash on Vast pod) | $5.87/hr while up, $0 down |
-| Best ZDR + scale-to-zero + "good-enough" coding | `sonnet-api` switched to GPT-OSS 120B | $0.20/hr active, $0 idle |
-| Best ZDR + Opus-quality (frontier) coding | `opus-vast` (Kimi K2.6 on Vast 8× H100) | $11.74/hr while up |
+### Performance caveats — read this before betting on these aliases
 
-There is **no Groq-API equivalent for Opus-tier** — Groq's production catalog tops out at GPT-OSS 120B, which is between Sonnet and Opus on capability. Opus-class needs either self-hosting (Level 6 below) or a different API provider that hosts DeepSeek V4 Pro / Kimi K2.6 (none with self-serve ZDR as of May 2026).
+**ZDR-first framing**: this repo prioritizes the contractual + technical privacy posture over hitting Claude's exact quality on every workload. The model choices are *the best ZDR-eligible options*, not necessarily the absolute best model. Specific caveats:
+
+- **Long-horizon tool-use consistency**: Claude Opus 4.7 still leads on 20+ tool-call agentic loops. Open-weights models including Kimi K2.6 drift more in long sessions. Mitigation: shorter task scope per `aider` session, explicit `/clear` between unrelated tasks.
+- **Aider edit-block format compliance**: Llama 3.3 70B and older Qwen models drop the diff format ~5–10% of the time on multi-file refactors. GPT-OSS 120B and Kimi K2.6 are noticeably more reliable. If a model misbehaves, try `--edit-format whole` or `--edit-format udiff`.
+- **GPQA / scientific reasoning**: Opus 4.7 leads (~94.2%). No open-weights model matches it yet on this specifically.
+- **MCP-Atlas / structured tool orchestration**: Opus 4.7 leads. Cline/Roo's tool-call layer may produce more retries on open-weights models — not a model defect per se, just edge cases.
+- **Adversarial-prompt robustness**: Closed frontier models have stronger safety/jailbreak resistance. Not relevant for solo coding work, important if you're exposing the proxy to untrusted inputs.
+- **Context length** in practice: Groq's GPT-OSS 120B is 131K context, K2.6 self-hosted is 256K, but quality degrades meaningfully past ~50K input on all open models. Keep contexts tight.
+- **Cost vs quality crossover**: Below ~2 hrs/day of opus-tier use, Anthropic Opus API at $30/hr is cheaper than running `opus-vast` at $7.74/hr × 24. Self-hosted opus wins on **continuous use + ZDR mandate**, not just "I want a frontier model occasionally."
 
 ### Current Groq production catalog (May 2026)
 
-| Groq model | Tok/s | $/M in | $/M out | Closest Claude | Use as |
+| Groq model | Tok/s | $/M in | $/M out | Closest Claude | Wired in this repo |
 |---|---|---|---|---|---|
-| Llama 3.1 8B Instant | 560 | $0.05 | $0.08 | Haiku-ish | current `haiku-api` |
-| **GPT-OSS 20B** | 1000 | $0.075 | $0.30 | Haiku-class, coding-tuned | **better `haiku-api`** |
-| Llama 3.3 70B Versatile | 280 | $0.59 | $0.79 | Sonnet 3.5-ish | current `sonnet-api` |
-| **GPT-OSS 120B** | 500 | $0.15 | $0.60 | Sonnet 4-ish, coding-tuned | **better `sonnet-api`** |
+| **GPT-OSS 20B** | 1000 | $0.075 | $0.30 | Haiku-class, coding-tuned | ⭐ current `haiku-api` |
+| **GPT-OSS 120B** | 500 | $0.15 | $0.60 | Sonnet-ish, coding-tuned | ⭐ current `sonnet-api` |
+| Llama 3.1 8B Instant | 560 | $0.05 | $0.08 | Haiku-ish | available — older default |
+| Llama 3.3 70B Versatile | 280 | $0.59 | $0.79 | Sonnet 3.5-ish (weaker for code) | available — 3× pricier than GPT-OSS 120B |
 
-DeepSeek V3/V4 are *preview-only* on Groq today — excluded from the BAA per BAA §1.1 (Covered Cloud Services excludes preview tier). For DeepSeek under ZDR you need self-hosted (Level 6) or a different API provider.
+DeepSeek V3/V4 and Kimi K2.6 are *not* in Groq's production catalog — DeepSeek is preview-only (excluded from BAA per §1.1), Kimi isn't hosted by Groq at all. For those under ZDR you need self-hosted (Level 6).
 
 ## Compliance posture
 
@@ -211,9 +219,55 @@ Always-on pod pricing for each tier (from current available on-demand offers):
 
 Versus going Anthropic-direct (no self-hosting): ~$30/hr for Opus-class agentic-coding workload. Crossover for opus is **~1.5 hrs/day** before self-hosted wins on cost.
 
-### DeepSeek V4 Pro on AWS (Level 6 + L4-tier compliance) — capacity warning
+### Opus-tier on open weights — Kimi K2.6 is the answer, not DeepSeek V4 Pro
 
-**DeepSeek V4 Pro is the open-weights model closest to Claude Opus 4.7** — 1.6T params MoE, ~49B active per token, 80.6% on SWE-bench. Weights ~864 GB. Doesn't fit on 8× H100 80GB (640 GB total < 864 GB); minimum viable host is **8× H200 141GB = 1,128 GB single node**, or 16× H100 across 2 nodes with NVLink+InfiniBand.
+**Important update (May 2026):** the strongest open-weights model for agentic coding is **Kimi K2.6** (Moonshot, April-May 2026), not DeepSeek V4 Pro. Verified benchmarks:
+
+| Model | SWE-Bench Verified | Terminal-Bench 2.0 | Where wired in this repo |
+|---|---|---|---|
+| **Kimi K2.6** | **88.7%** | **82.7%** | ⭐ `opus-vast` (already running this) |
+| Claude Opus 4.7 | 87.6% | — | n/a (closed API only) |
+| DeepSeek V4 Pro | 80.6% | — | not wired |
+| GPT-5.5 | — | — | not wired |
+
+Kimi K2.6 **beats Opus 4.7 by 1.1 points on SWE-Bench Verified** and is the highest-scoring model in the May 2026 leaderboard on both SWE-Bench and Terminal-Bench 2.0. The repo's `opus-vast` route already uses it — so **the strongest open-source opus-class is already live in this repo**.
+
+**Where Opus 4.7 still wins (real performance caveats):**
+
+- **GPQA Diamond** (scientific reasoning): Opus 4.7 ~94.2% — leads
+- **Long-context coherence on 100K+ token sessions**: Opus 4.7 still more consistent
+- **MCP-Atlas / structured tool orchestration**: Opus 4.7 leads
+- **Agentic coding consistency over very long horizons** (20+ tool calls): Opus 4.7 has the edge
+- **Edge-case handling on adversarial prompts**: Opus 4.7's safety training is more robust
+
+**Where Kimi K2.6 wins:**
+
+- Pure SWE-Bench Verified score
+- Terminal-Bench 2.0 (real-world terminal-based agentic tasks)
+- Multilingual coding (non-English codebases)
+- Agent-swarm coordination
+- Competition math
+- **Cost: 5–6× cheaper than Opus** when self-hosted at typical workloads
+
+**Honest verdict for this repo's threat model:** If your blocker is ZDR, `opus-vast` (Kimi K2.6 on Vast 8× H100 or 4× H200) is the right call. You give up ~5–10% on long-horizon coherence and tool orchestration in exchange for **contractually + technically guaranteed ZDR**, no managed-provider in the path, and a model that's actually ahead on SWE-Bench. For most coding work the gap is invisible.
+
+### Other recent OSS frontier releases (April–May 2026) worth knowing
+
+| Model | Vendor | License | Notes for this repo |
+|---|---|---|---|
+| **Kimi K2.6** | Moonshot | open weights | Best opus-tier — already wired as `opus-vast` |
+| **DeepSeek V4 Pro** | DeepSeek | open weights | 80.6% SWE-Bench — strong but below Kimi K2.6. AWS sub-tier candidate (see below). |
+| **DeepSeek V4 Flash** | DeepSeek | open weights | Already wired as `sonnet-vast` — sonnet-class FP8 |
+| **GLM-5.1** | Z.ai | open weights | Newer, similar tier to DeepSeek V4 Flash |
+| **Qwen 3.6** | Alibaba | Apache 2.0 | Strong on broad benchmarks; not yet wired |
+| **MiMo-V2.5-Pro** | Xiaomi | open weights | Strong reasoning |
+| **MiniMax M2.7** | MiniMax | open weights | Recent open-source |
+| **Gemma 4** | Google | open weights | Smaller — haiku-tier |
+| **Ring-2.6-1T** | Ant Group (inclusionAI) | open weights | Large MoE, 1T params |
+
+### DeepSeek V4 Pro on AWS (Level 6 + L4-tier compliance) — when this makes sense
+
+**DeepSeek V4 Pro is one viable open-weights opus-class model** — 1.6T params MoE, ~49B active per token, 80.6% on SWE-bench (lower than Kimi K2.6's 88.7%, but ahead of most). Weights ~864 GB. Doesn't fit on 8× H100 80GB (640 GB total < 864 GB); minimum viable host is **8× H200 141GB = 1,128 GB single node**, or 16× H100 across 2 nodes with NVLink+InfiniBand.
 
 AWS EC2 instances that fit it (verified May 2026):
 
