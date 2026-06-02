@@ -67,12 +67,29 @@ $EDITOR .env                                     # set GROQ_API_KEY and/or VAST_
 ./scripts/deploy-vast.sh haiku                   # Level 6 — your own GPU pod
 ```
 
-The deploy script prints the Cline configuration when it's done. Paste it into VSCodium → Cline → gear icon:
+### Pick a client
+
+LiteLLM is now serving an OpenAI-compatible endpoint on `http://localhost:4000/v1`. Point any agentic coding tool at it:
+
+**Aider (recommended — terminal, no extension fragility):**
+
+```bash
+./scripts/aider-up.sh   # one-time install (pipx install aider-chat)
+./scripts/aider.sh      # launch — defaults to sonnet-api
+```
+
+Slash commands inside Aider: `/add <file>`, `/run <cmd>`, `/commit`, `/undo`, `/help`. Works flawlessly over SSH/tmux. To switch tier mid-session: exit and `ZDR_MODEL=haiku-api ./scripts/aider.sh`.
+
+**Cline / Roo Code (VSCode/VSCodium extension):**
+
+VSCodium → Cline (or Roo) → gear icon:
 
 - **API Provider**: OpenAI Compatible
 - **Base URL**: `http://localhost:4000/v1`
-- **API Key**: contents of `.litellm-key` (auto-generated)
+- **API Key**: contents of `.litellm-key` (auto-generated; `cat .litellm-key`)
 - **Model ID**: `sonnet-api` (or `sonnet-vast` / `haiku` / etc — see below)
+
+Cline is more autonomous; Aider is more controllable. Pick whichever fits your workflow. For SSH-Remote dev specifically, Aider avoids a class of extension-host networking bugs — see [Using Cline from a remote SSH host](#using-cline-from-a-remote-ssh-host-vscodium-remote-ssh-tailscale-ssh-etc) below.
 
 Done. Start coding.
 
@@ -302,6 +319,8 @@ Field-tested gotchas baked into the scripts as comments and filters:
 │   ├── install-prereqs.sh          # macOS/Linux installer
 │   ├── install-prereqs.ps1         # Windows installer
 │   ├── api-up.sh                   # Level 3 — Groq API mode
+│   ├── aider-up.sh                 # one-time install of Aider (terminal client)
+│   ├── aider.sh                    # launch Aider pointed at the local proxy
 │   ├── deploy.sh                   # Level 6 — RunPod always-on pod
 │   ├── deploy-vast.sh              # Level 6 — Vast.ai pod (recommended)
 │   ├── deploy-serverless.sh        # Level 6 — RunPod serverless
