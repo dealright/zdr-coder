@@ -4,7 +4,104 @@
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](COMPLIANCE.md)
 [![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20provider%20BAA-purple.svg)](COMPLIANCE.md)
 
-**Self-host your AI coding assistant.** Use VSCodium + Cline like you'd use Claude Code, but your prompts never go to OpenAI, Anthropic, or Google. Two options out of the box: cheap+fast **API mode** (Groq, with zero-data-retention) or **bring-your-own-GPU mode** (rent a pod in a HIPAA-eligible datacenter, run open-source models yourself). One command sets it up. One command tears it down.
+**Self-host your AI coding assistant.** Like ChatGPT or Claude — but the AI runs on a server you control, your prompts never get used to train anyone's model, and it costs cents per session instead of $20/month.
+
+> **New to this?** Jump to [**📚 If you've never used a terminal**](#-if-youve-never-used-a-terminal-read-this-first) for a step-by-step walkthrough. Most readers below are developers — that section is for everyone else.
+
+## 📚 If you've never used a terminal, read this first
+
+Most "self-host your AI" guides assume you're a developer. This section is for everyone else. **No coding experience required.** You'll spend ~30 minutes setting it up once, then never think about it again.
+
+### What you'll get
+
+- A chat window in your browser where you talk to an AI coding assistant (like ChatGPT, but private)
+- Your code and conversations **never leave your computer or the AI provider** — no training data harvest, no logs
+- **Pennies per session** instead of $20/month — Groq charges per-use, with $0 idle
+- Works on **Mac, Windows, or Linux**
+
+### What you'll need
+
+| What | Where | Cost |
+|---|---|---|
+| **Docker Desktop** (the engine that runs everything) | https://docs.docker.com/desktop/ — pick your OS | Free |
+| **A Groq account** (provides the AI) | https://console.groq.com/ | Free signup, pennies per use |
+| **About 30 minutes** | — | Yours |
+
+You will not need to:
+- Know what an API, container, or proxy is
+- Write or edit any code
+- Run commands manually (after the one-time setup)
+
+### Step-by-step setup
+
+#### 1. Install Docker Desktop (10 min)
+
+Go to the link in the table above, download the installer for your OS, run it.
+After installing, open Docker Desktop and wait until the menu-bar/tray icon shows "Docker Desktop is running."
+(You only do this once.)
+
+#### 2. Get your free Groq API key (3 min)
+
+1. Go to https://console.groq.com/ — sign up with Google or email.
+2. Click **API Keys** in the left sidebar → **Create API Key** → copy the key (it starts with `gsk_...`). Save it somewhere safe — you'll need it in a moment.
+
+#### 3. Turn on Zero Data Retention (1 min — important for privacy)
+
+1. Go to https://console.groq.com/settings/data-controls
+2. Toggle **Zero Data Retention** to **ON**.
+3. This stops Groq from keeping any record of your prompts. You can verify it stuck by reloading the page.
+
+#### 4. Download this project (2 min)
+
+1. At the top of this page, click the green **`<> Code`** button → **Download ZIP**.
+2. Unzip the file. You'll have a folder called `zdr-coder-main`. Move it somewhere you'll find it again (Documents, Desktop, anywhere).
+3. Open the folder. Find the file called **`.env.example`** — make a copy and rename the copy to **`.env`** (yes, just `.env` — no `.example`).
+4. Open `.env` in TextEdit (Mac) or Notepad (Windows). Find the line that says `GROQ_API_KEY=` and paste your Groq key from step 2 right after the `=`. Save and close.
+
+#### 5. Start everything (one double-click)
+
+- **Mac**: Double-click **`start.command`** in the project folder. *(If macOS warns about an "unidentified developer," right-click → Open → Open.)*
+- **Windows**: Double-click **`start.bat`** in the project folder.
+
+A Terminal/Command Prompt window will appear and show progress. After a minute or two it will say "Stack is running" and your browser will open to **http://localhost:3000** — that's the AI chat interface (OpenHands).
+
+#### 6. Use it
+
+1. In OpenHands, you'll see a chat box. Drop your project folder into the workspace pane (or just chat without a folder for general questions).
+2. Type what you want the AI to do — "build me a simple todo app", "explain this code", "fix the bug where X happens", etc.
+3. The AI will plan, edit files, and run commands inside its own sandbox. You watch and approve.
+
+#### 7. Stop when done
+
+Double-click **`stop.command`** (Mac) or **`stop.bat`** (Windows). This stops the AI and the proxy. Your API key and settings are preserved for next time.
+
+To start again later: just double-click `start.command` again.
+
+### What to do if something goes wrong
+
+| Symptom | Fix |
+|---|---|
+| `start.command` says "Docker Desktop did not start" | Open Docker Desktop manually from Applications, wait for the icon to say "running," then try `start.command` again. |
+| `start.command` says "Missing Groq API key" | It will open the `.env` file for you. Paste your key after `GROQ_API_KEY=` and save. |
+| Browser shows "This site can't be reached" | Wait another 30 seconds — first launch is slow. Refresh the page. If still broken, double-click `stop.command` then `start.command` again. |
+| Bills look higher than expected | You may have left a self-hosted GPU pod running. Double-click `stop.command` to stop everything. Groq API mode by itself costs $0 when idle. |
+| Anything else | Take a screenshot and ask the friend who pointed you here. |
+
+### Costs in plain language
+
+Using the default setup (Groq API mode), your costs are roughly:
+
+| What you're doing | Approximate cost |
+|---|---|
+| Stack sitting idle (you're not chatting) | **$0** |
+| 1 hour of active AI coding work | **~$0.20** |
+| 8 hours/day, every weekday, for a month | **~$30/month** |
+| Compare: ChatGPT Plus | $20/month |
+| Compare: Claude Pro | $20/month |
+
+So at most workloads, this is **cheaper than ChatGPT Plus or Claude Pro** while giving you actual zero-data-retention.
+
+---
 
 ## Why this exists
 
@@ -71,7 +168,16 @@ $EDITOR .env                                     # set GROQ_API_KEY and/or VAST_
 
 LiteLLM is now serving an OpenAI-compatible endpoint on `http://localhost:4000/v1`. Point any agentic coding tool at it:
 
-**Aider (recommended — terminal, no extension fragility):**
+**OpenHands (browser-based — best for non-developers, or anyone who wants a visual workspace):**
+
+```bash
+./scripts/openhands-up.sh           # starts at http://localhost:3000
+./scripts/openhands-down.sh         # stop
+```
+
+Browser UI with file workspace, sandboxed shell, plan/act loops. Backed by the same LiteLLM proxy. The non-developer `start.command` / `start.bat` launchers wrap this path end-to-end (Docker → LiteLLM → OpenHands → browser).
+
+**Aider (terminal, recommended for developers — no extension fragility):**
 
 ```bash
 ./scripts/aider-up.sh   # one-time install (pipx install aider-chat)
@@ -420,6 +526,8 @@ Field-tested gotchas baked into the scripts as comments and filters:
 ├── README.md                       # this file
 ├── COMPLIANCE.md                   # full Level-by-Level compliance mapping
 ├── LICENSE                         # MIT
+├── start.command / start.bat       # double-click launchers (Mac / Windows)
+├── stop.command / stop.bat         # double-click teardown
 ├── docker-compose.yml              # LiteLLM container
 ├── litellm/config.yaml             # model-ID routes
 ├── gpu-node/
@@ -431,6 +539,8 @@ Field-tested gotchas baked into the scripts as comments and filters:
 │   ├── api-up.sh                   # Level 3 — Groq API mode
 │   ├── aider-up.sh                 # one-time install of Aider (terminal client)
 │   ├── aider.sh                    # launch Aider pointed at the local proxy
+│   ├── openhands-up.sh             # browser-based agent UI for non-developers
+│   ├── openhands-down.sh           # stop OpenHands
 │   ├── deploy.sh                   # Level 6 — RunPod always-on pod
 │   ├── deploy-vast.sh              # Level 6 — Vast.ai pod (recommended)
 │   ├── deploy-serverless.sh        # Level 6 — RunPod serverless
