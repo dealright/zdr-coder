@@ -75,17 +75,19 @@ model_list:
   # GPT-OSS (OpenAI's open-weight reasoning models, released Aug 2025) is
   # tool-use + coding tuned and ~3× cheaper than Llama 3.3 70B. As of May 2026
   # it's the right pick for both tiers on Groq. See README "Honest tier mapping".
-  # NOTE: slug is `groq/gpt-oss-120b` not `groq/openai/gpt-oss-120b` —
-  # LiteLLM's provider parser breaks on the second slash and falls back to
-  # OpenAI direct (404). See https://github.com/BerriAI/litellm/issues/14807
+  # Groq exposes GPT-OSS under `openai/gpt-oss-Nb` (the "openai/" is part of
+  # Groq's model name, not a LiteLLM provider prefix). LiteLLM's native Groq
+  # integration forwards everything after `groq/` to Groq's API, so the
+  # correct slug is `groq/openai/gpt-oss-Nb`. Verify with:
+  #   curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
   - model_name: haiku-api
     litellm_params:
-      model: groq/gpt-oss-20b
+      model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
   - model_name: sonnet-api
     litellm_params:
-      model: groq/gpt-oss-120b
+      model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
   # Back-compat aliases: heavy/plan → sonnet

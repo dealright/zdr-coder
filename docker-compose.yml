@@ -37,3 +37,12 @@ services:
       - "4000"
       - --host
       - "0.0.0.0"
+    # Healthcheck so `docker compose ps` shows real readiness and downstream
+    # automation can wait on `condition: service_healthy` instead of sleeping.
+    # /health/readiness is LiteLLM's lightweight unauth probe.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/readiness', timeout=2).status == 200 else 1)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s

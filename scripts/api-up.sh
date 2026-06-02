@@ -38,11 +38,24 @@ echo
 echo "═ 2/3  LiteLLM"
 if ! docker compose ps litellm --status running 2>/dev/null | grep -q litellm; then
   docker compose up -d
-  sleep 3
 else
   docker compose up -d --force-recreate litellm
-  sleep 3
 fi
+
+# Wait for the container's healthcheck to report healthy (defined in
+# docker-compose.yml). Replaces the previous fixed `sleep 3` which raced the
+# smoke test on slower hosts.
+echo -n "  waiting for LiteLLM to become healthy"
+for i in $(seq 1 30); do
+  STATUS=$(docker inspect --format='{{.State.Health.Status}}' zdr-litellm 2>/dev/null || echo "")
+  if [ "$STATUS" = "healthy" ]; then
+    echo " — ready"
+    break
+  fi
+  echo -n "."
+  sleep 2
+done
+[ "$STATUS" = "healthy" ] || { echo " — TIMEOUT (status=$STATUS); container may still come up shortly. Last 20 log lines:"; docker logs zdr-litellm 2>&1 | tail -20; }
 echo "  ✓ LiteLLM on http://localhost:4000"
 
 echo
