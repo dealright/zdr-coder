@@ -90,6 +90,12 @@ model_list:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
+  # Note: there is no `opus-api` route. Groq's production catalog tops out at
+  # GPT-OSS 120B (Sonnet-class). For Opus-class via API you'd need a second
+  # provider (Fireworks, DeepInfra, etc.) — we deliberately keep this to a
+  # single API key to minimize non-developer setup friction. Use `opus-vast`
+  # (self-hosted Kimi K2.6) when you need Opus-class.
+
   # Back-compat aliases: heavy/plan → sonnet
   - model_name: heavy
     litellm_params:

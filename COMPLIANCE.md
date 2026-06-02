@@ -49,7 +49,7 @@ Read these against the doc versions in force on your account at the time you sig
 
 | Gap | Why it's a gap | Workaround if you need it |
 |---|---|---|
-| **True end-to-end encryption** | Groq must see plaintext to run inference. TLS only protects the wire; the GPU has the cleartext. | Confidential computing (TEE-attested inference). Groq does not offer this in May 2026. Tinfoil and Apple PCC are the only options today, neither serves Llama 3.3 70B. |
+| **True end-to-end encryption** | Groq must see plaintext to run inference. TLS only protects the wire; the GPU has the cleartext. | Confidential computing (TEE-attested inference). Groq does not offer this in May 2026. Tinfoil and Apple PCC are the only options today, neither serves GPT-OSS 120B. |
 | **Cryptographic proof ZDR is on** | The toggle is a contractual switch; you can't independently verify Groq is honoring it. You trust the SOC 2 audit. | Periodic vendor-attestation review, SOC 2 report read. |
 | **HITRUST CSF certification** | Groq does not claim it. | If a payer requires HITRUST, use a self-hosted route (`-vast` / `-serverless`) with your own attested infra. |
 | **FedRAMP authorization** | Groq is not FedRAMP authorized as of May 2026. | Self-host on FedRAMP-authorized cloud, or use AWS Bedrock / Azure AI for FedRAMP-eligible LLM calls. |
