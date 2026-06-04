@@ -1,0 +1,29 @@
+# Minimal SkyPilot smoke test.
+# Boots 1× L40S, runs nvidia-smi to confirm GPU is visible, exits.
+# Total time: ~2 min. Cost: ~$0.03 on RunPod L40S.
+#
+# Usage:
+#   sky launch -c smoke-test sky/smoke-test.yaml --yes
+#   # When done:
+#   sky down smoke-test --yes
+
+name: smoke-test
+
+resources:
+  accelerators: {L40S:1, L40:1, A10G:1}
+  any_of:
+    - cloud: runpod
+    - cloud: verda
+  disk_size: 50
+
+run: |
+  echo "=== SMOKE TEST ==="
+  echo "Hostname: $(hostname)"
+  echo "Date: $(date)"
+  echo "--- GPU info ---"
+  nvidia-smi
+  echo "--- Disk ---"
+  df -h /
+  echo "--- Memory ---"
+  free -h
+  echo "=== PASSED ==="

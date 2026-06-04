@@ -1,0 +1,62 @@
+# zdr-coder — Opus-tier scale-to-zero serverless ⚠️
+# Kimi K2.6 with min_replicas: 0
+# Cost: $0 idle, ~$11/hr active. Cold start: 3–5 MIN (554 GB weights load).
+#
+# THE COLD-START WILL HURT. Two mitigations baked in:
+#   1. Bucket mount for weights (set BUCKET_PATH below) — ~2 min cold start
+#   2. Custom VM image with weights baked in — ~60–90s cold start
+#
+# If neither is acceptable, use opus-pod.yaml (min_replicas: 1) and toggle
+# manually with `sky serve down opus-serve` / `sky serve up`.
+#
+# Usage:
+#   sky serve up -n opus-serve sky/opus-serve.yaml
+#   sky serve status
+#   sky serve down opus-serve
+
+service:
+  readiness_probe:
+    path: /v1/models
+    initial_delay_seconds: 600   # 10 min initial grace
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 1
+    target_qps_per_replica: 1
+    upscale_delay_seconds: 60
+    downscale_delay_seconds: 1800   # 30 min idle (cold start is brutal)
+
+resources:
+  # 8× H200 ONLY — Kimi K2.6 needs 1128 GB VRAM (BF16 attention + KV cache
+  # blow past the naive "554 GB weights fit on 640 GB H100s" math).
+  # Production deployment: https://medium.com/@shivank1128/deploying-kimi-k2-5-on-h200-gpus-the-real-story-nobody-tells-you-7a18a6ca905a
+  accelerators: {H200:8}
+  any_of:
+    - cloud: runpod
+    - cloud: vast
+    - cloud: lambda
+    - cloud: aws
+  disk_size: 700
+  ports: 8080
+  image_id: docker:vllm/vllm-openai:v0.10.0
+
+# Uncomment to mount pre-staged weights bucket (cuts cold start ~50%):
+# file_mounts:
+#   /weights:
+#     source: s3://your-zdr-bucket/kimi-k2.6
+#     mode: MOUNT
+
+setup: |
+  set -e
+  # vllm is pre-installed in vllm/vllm-openai:v0.10.0 Docker image
+  mkdir -p ~/cache
+
+run: |
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model moonshotai/Kimi-K2-Instruct \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 131072 \
+    --gpu-memory-utilization 0.90 \
+    --trust-remote-code \
+    --served-model-name opus-serve

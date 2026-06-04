@@ -1,0 +1,45 @@
+# zdr-coder — Sonnet-tier always-on inference pod
+# DeepSeek V4 Flash (158B FP8, 149 GB weights) on 4× H100 80GB
+# Cost: $13–$16/hr depending on tier-selected backend
+#
+# Usage:
+#   sky launch -c sonnet-pod sky/sonnet-pod.yaml
+#   sky status
+#   sky down sonnet-pod
+
+name: sonnet-pod
+
+resources:
+  # 8× added as fallback per user OK — when 4× is dry, use 8× and overprovision.
+  # A100-80GB:8 added because AWS H100/H200 inventory is empty in mid-2026;
+  # p4de.24xlarge (8× A100 80GB, $27.45/hr us-east-1) has actual capacity.
+  # tensor-parallel-size is auto-detected from $SKYPILOT_NUM_GPUS_PER_NODE in run block.
+  accelerators: {H100:4, A100-80GB:4, H200:4, H100:8, A100-80GB:8, H200:8}
+  # 4-backend failover pool. Vast has cheapest 4× H100 ($7.47) and 8× H100 ($14.94).
+  # AWS p5 is 8× only (no 4× SKU) — picks up via 8× fallback. OCI excluded (no docker_image support).
+  any_of:
+    - cloud: runpod
+    - cloud: vast
+    - cloud: lambda
+    - cloud: aws
+
+  # Pinned vLLM image avoids: Vast lacks nvcc/ninja, Lambda driver too old for :latest
+  image_id: docker:vllm/vllm-openai:v0.10.0
+
+  disk_size: 300   # GB — DeepSeek V4 Flash weights are ~149 GB
+  ports: 8080
+
+setup: |
+  set -e
+  mkdir -p ~/cache
+
+run: |
+  # tensor-parallel-size auto-detected (works for 4× or 8× SKUs SkyPilot lands on)
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model deepseek-ai/DeepSeek-V4-Flash \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 65536 \
+    --gpu-memory-utilization 0.92 \
+    --served-model-name sonnet-pod

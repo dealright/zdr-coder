@@ -1,0 +1,54 @@
+# zdr-coder — Opus-tier always-on inference pod
+# Kimi K2.6 (1T params, 554 GB weights) — 8× H100 80GB (640 GB) or 4× H200 (564 GB)
+# Cost: $26–$36/hr on soc2 tier (Nebius/Verda); $7.74/hr on cheap (Vast)
+#
+# Note: 4× H200 (564 GB) is the SWEET SPOT but availability is thin —
+# Vast has it cheapest; Verda has a clean 4× SXM5 SKU at $16/hr; Nebius
+# doesn't sell a 4× SKU (only 1× and 8×).
+#
+# Usage:
+#   sky launch -c opus-pod sky/opus-pod.yaml
+#   sky status
+#   sky down opus-pod
+
+name: opus-pod
+
+resources:
+  # 8× H200 ONLY — Kimi K2 production deployment requires 1128 GB VRAM total.
+  # 4× H200 (564 GB) and 8× H100 (640 GB) BOTH OOM in production — naive
+  # "weights fit in VRAM" math undercounts BF16 attention layers + KV cache.
+  # Pinned vLLM image to v0.10.0 — Vast lacks nvcc/ninja; Lambda has too-old driver for :latest.
+  image_id: docker:vllm/vllm-openai:v0.10.0
+  # Backend failover pool. RunPod uses H200-SXM naming ($35.12/hr).
+  # Vast: cheapest 8× H200 (~$20.71/hr France) — but offers often stale.
+  # AWS p5e/p5en 48xl (~$63 OD) — frequently capacity-constrained.
+  any_of:
+    # Vast first: cheapest 8× H200 (~$20.71/hr); offer-bid race common.
+    - cloud: vast
+      accelerators: H200:8
+    # RunPod fallback ($35.12/hr) — H200 SXM allocation has been getting stuck
+    # in "rented but never starts" state, so kept but deprioritised.
+    - cloud: runpod
+      accelerators: H200-SXM:8
+    # AWS p5e/p5en 48xl (~$63/hr) — frequently capacity-constrained but a
+    # legitimate fallback for compliance critical loads.
+    - cloud: aws
+      accelerators: H200:8
+
+  disk_size: 700   # GB — Kimi K2 weights ~380-554 GB
+  ports: 8080
+
+setup: |
+  mkdir -p ~/cache
+
+run: |
+  # tensor-parallel-size auto-detected from num GPUs by vLLM
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model moonshotai/Kimi-K2-Instruct \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 131072 \
+    --gpu-memory-utilization 0.90 \
+    --trust-remote-code \
+    --served-model-name opus-pod

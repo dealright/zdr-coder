@@ -8,6 +8,51 @@
 # MODEL defaults in scripts/deploy.sh.
 
 model_list:
+  # ── SkyPilot-launched self-hosted pods (live endpoints) ──
+  # Endpoints are filled by ./scripts/sky-up.sh after `sky launch` completes;
+  # IP/port changes every time you tear down and relaunch the cluster.
+  # Run this to refresh manually if needed:
+  #   echo "HAIKU_POD_API_BASE=http://$(sky status --endpoint 8080 haiku-pod)/v1" >> .env-runtime
+  #
+  # vLLM has no auth by default — api_key is a dummy placeholder so LiteLLM
+  # is satisfied; the actual access control is the bearer token between Cline
+  # and LiteLLM (`.litellm-key`).
+  - model_name: haiku-pod
+    litellm_params:
+      model: openai/haiku-pod
+      api_base: os.environ/HAIKU_POD_API_BASE
+      api_key: dummy
+
+  - model_name: sonnet-pod
+    litellm_params:
+      model: openai/sonnet-pod
+      api_base: os.environ/SONNET_POD_API_BASE
+      api_key: dummy
+
+  - model_name: opus-pod
+    litellm_params:
+      model: openai/opus-pod
+      api_base: os.environ/OPUS_POD_API_BASE
+      api_key: dummy
+
+  - model_name: haiku-serve
+    litellm_params:
+      model: openai/haiku-serve
+      api_base: os.environ/HAIKU_SERVE_API_BASE
+      api_key: dummy
+
+  - model_name: sonnet-serve
+    litellm_params:
+      model: openai/sonnet-serve
+      api_base: os.environ/SONNET_SERVE_API_BASE
+      api_key: dummy
+
+  - model_name: opus-serve
+    litellm_params:
+      model: openai/opus-serve
+      api_base: os.environ/OPUS_SERVE_API_BASE
+      api_key: dummy
+
   - model_name: haiku
     litellm_params:
       model: openai/Qwen/Qwen2.5-Coder-32B-Instruct-AWQ

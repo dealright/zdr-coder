@@ -4,574 +4,473 @@
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](COMPLIANCE.md)
 [![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20provider%20BAA-purple.svg)](COMPLIANCE.md)
 
-**Self-host your AI coding assistant.** Like ChatGPT or Claude — but the AI runs on a server you control, your prompts never get used to train anyone's model, and it costs cents per session instead of $20/month.
+**Self-host your AI coding assistant with verifiable ZDR.** Open-weights models (Kimi K2.6, DeepSeek V4, GPT-OSS) on rented GPU, behind one local OpenAI-compatible proxy. One config picks your compliance/cost tier; SkyPilot[^skypilot] aggregates supply across providers and fails over automatically.
 
-> **New to this?** Jump to [**📚 If you've never used a terminal**](#-if-youve-never-used-a-terminal-read-this-first) for a step-by-step walkthrough. Most readers below are developers — that section is for everyone else.
+> **Never used a terminal?** Jump to [📚 If you've never used a terminal](#-if-youve-never-used-a-terminal-read-this-first).
 
-## 📚 If you've never used a terminal, read this first
+## 5-minute setup
 
-Most "self-host your AI" guides assume you're a developer. This section is for everyone else. **No coding experience required.** You'll spend ~30 minutes setting it up once, then never think about it again.
+```bash
+# 1. Run the interactive setup (creates venv, installs SkyPilot, prompts you per backend)
+./scripts/setup.sh
 
-### What you'll get
+# 2. Start the local proxy + agent
+./start.command  (mac) | ./start.bat  (win) | ./scripts/api-up.sh  (linux)
 
-- A chat window in your browser where you talk to an AI coding assistant (like ChatGPT, but private)
-- Your code and conversations **never leave your computer or the AI provider** — no training data harvest, no logs
-- **Pennies per session** instead of $20/month — Groq charges per-use, with $0 idle
-- Works on **Mac, Windows, or Linux**
+# 3. Use it
+open http://localhost:3000                   # OpenHands (browser) — or point Cline/Aider at :4000
+```
 
-### What you'll need
+The setup script reads `ZDR_TIER` from `.env` (defaults to `soc2`) and walks you through web signups + key paste for the backends that tier needs. Each backend prompt is **Y / n** — pressing `n` skips for this run; re-run `./scripts/setup.sh` any time to add a backend later.
 
-| What | Where | Cost |
+### Known signup issues
+
+- **Nebius may decline US-issued cards** at signup (Stripe declines, even with travel notice + international transactions enabled — happens with both BofA and Citi). Workarounds: try a Wise or Revolut card, or just `skip` Nebius and proceed with Verda + RunPod (2-way failover is fine).
+- **AWS Bedrock model access** is per-account approval. Llama/Mistral are usually instant; Anthropic Claude needs a one-time request form (~1 hr approval).
+- **AWS p5/p5e/p5en GPU quota** defaults to 0 on new accounts. 1–4 day approval through the quota request form. If you need fast on-instance compliance, use Bedrock (Path 1) instead.
+
+### Known backend capability gaps
+
+- **Verda doesn't support `open_ports`**. That breaks `sky launch` AND `sky serve` for any config that needs an externally-reachable vLLM endpoint (which is all 6 SkyPilot configs in this repo). Verda's catalog is currently used only as a fallback for non-port-exposing workloads.
+- **No `1× L40S` SKU on Verda**. Verda sells H100 / H200 / B200 (mid-to-high tier). For 1× L40S the better target is RunPod or Lambda (1× A100).
+- **RunPod through SkyPilot is Secure Cloud only** — the catalog ships only `_SECURE` instance types. Community Cloud isn't reachable via SkyPilot. Good news for compliance, no config needed.
+- **Vast.ai only auto-forwards port 8080** (via `ssh_host:ssh_port+1`). All sky/*.yaml configs use port 8080 — don't change it unless you also reconfigure Vast.
+- **OCI does NOT support `docker_image`** in SkyPilot. The 6 sky/*.yaml configs use `image_id: docker:vllm/vllm-openai:v0.10.0`, so OCI is excluded from their backend pools (it works for `sky check`, just not these YAMLs).
+- **Bucket mount for opus weights** is OPTIONAL. Only useful if you run `opus-serve` (scale-to-zero) with infrequent traffic; for `opus-pod` (always-on) the first launch is slow but subsequent restarts are fast. **Cheap neoclouds (Vast/RunPod) don't support FUSE-MOUNT for buckets** — only AWS/GCP/Azure do. Use `mode: COPY` if you must stage weights through R2 from Vast/RunPod.
+
+### Reality check: mid-2026 GPU capacity
+
+These came up during this repo's actual deployment testing and are worth knowing before you waste an afternoon:
+
+| GPU | Reality | Implication |
 |---|---|---|
-| **Docker Desktop** (the engine that runs everything) | https://docs.docker.com/desktop/ — pick your OS | Free |
-| **A Groq account** (provides the AI) | https://console.groq.com/ | Free signup, pennies per use |
-| **About 30 minutes** | — | Yours |
+| **8× H200 (opus tier)** | Genuinely scarce across **all** clouds. Vast bid 400s, RunPod 8× H200 has an allocator bug, AWS p5e InsufficientCapacity, GCP A3 Ultra is reservation-only | Opus tier may simply not launch on a given day; AWS Capacity Blocks (1-14 day pre-paid windows) is the most reliable path |
+| **4-8× H100 (sonnet tier)** | AWS quota approved ≠ AWS has capacity. Even with 192 vCPU quota, p5.48xlarge returns `InsufficientInstanceCapacity` in us-east-1/2/west-1/2 | Fall back to **p4de.24xlarge (8× A100 80GB, $27/hr us-east-1)** — DeepSeek V4 Flash fits easily; `sonnet-pod.yaml`'s `accelerators:` list already includes `A100-80GB:8` |
+| **1× L40S (haiku tier)** | AWS G-family quota (g5/g6e) default = 0 vCPUs and **per-region**. Smallest g6e.xlarge needs 4 vCPUs. | Use **Lambda 1× A100 SXM4** ($1.99/hr, plentiful supply) instead — `haiku-pod.yaml` already targets this |
+| **vLLM Docker image** | `vllm/vllm-openai:latest` requires CUDA driver 12.9+ which Lambda's hosts don't have | Pin to `vllm/vllm-openai:v0.10.0` (already in the YAMLs); v0.10.0 supports driver 12.4+ |
+| **AWS GPU quotas** | Per-region. The "Running On-Demand P instances" 192 vCPU quota approved in us-east-2 doesn't grant capacity in eu-west-2 / us-west-2 / etc. | Submit the same request in every region you intend to use. Single approval ≠ global. |
+| **Vast.ai SSH** | ~30% of hosts refuse SSH for 10+ min after rental | `sky launch --retry-until-up` is mandatory; rolls through hosts/regions automatically |
 
-You will not need to:
-- Know what an API, container, or proxy is
-- Write or edit any code
-- Run commands manually (after the one-time setup)
+## Pick your path
 
-### Step-by-step setup
+There are two orthogonal axes: **what models you want** and **what compliance you need**. Most users only need the first axis.
 
-#### 1. Install Docker Desktop (10 min)
+### Path 1: Managed APIs (recommended for non-devs and anyone not needing self-hosted opus)
 
-Go to the link in the table above, download the installer for your OS, run it.
-After installing, open Docker Desktop and wait until the menu-bar/tray icon shows "Docker Desktop is running."
-(You only do this once.)
+No GPU provisioning. No quota requests. Sign up, paste key, done. Both options below are wired in the repo.
 
-#### 2. Get your free Groq API key (3 min)
+| Goal | Backend | Setup | Cost | Compliance |
+|---|---|---|---|---|
+| Cheapest, ZDR-eligible | **Groq API** (Level 3) — `haiku-api` + `sonnet-api` | https://console.groq.com → API Keys → toggle ZDR | $0 idle, ~$0.10–$0.20/hr active | SOC 2 Type II + ISO 27001 + HIPAA-BAA-eligible[^groq-baa] |
+| Need a signed BAA right now, click-through | **AWS Bedrock** (Level 4) — managed Claude/Llama | https://console.aws.amazon.com/bedrock → Accept BAA in AWS Artifact → enable model access | ~$3–$15 per million tokens | Full AWS stack: SOC 2 + ISO 27001/27017/27018 + FedRAMP Moderate/High + HITRUST + signed BAA[^aws-baa] |
 
-1. Go to https://console.groq.com/ — sign up with Google or email.
-2. Click **API Keys** in the left sidebar → **Create API Key** → copy the key (it starts with `gsk_...`). Save it somewhere safe — you'll need it in a moment.
+The non-dev path is Groq unless your compliance team specifically requires a vendor-signed BAA. Bedrock is the BAA path that doesn't require GPU quota increases (it's a managed API, not EC2). You skip the entire "GPU acquisition" problem.
 
-#### 3. Turn on Zero Data Retention (1 min — important for privacy)
+### Path 2: Self-hosted on rented GPU (this is where the tier picker matters)
 
-1. Go to https://console.groq.com/settings/data-controls
-2. Toggle **Zero Data Retention** to **ON**.
-3. This stops Groq from keeping any record of your prompts. You can verify it stuck by reloading the page.
+Pick this if you want **opus-class** (Kimi K2.6, DeepSeek V4 Pro) under ZDR, or want to run *your* container instead of someone else's API. One env var picks the SkyPilot backend pool; SkyPilot handles failover.
 
-#### 4. Download this project (2 min)
+**This repo is sales-free by design.** No phone calls, no scheduled demos, no enterprise contracts. Every backend in the table below can be set up entirely through web signup + CLI keys. Tiers requiring sales calls for BAA (CoreWeave, OCI, Vast Secure tier) are documented in the master table but **not** wired into a default `ZDR_TIER` — if you genuinely need their BAA, you'd configure them as a one-off override.
 
-1. At the top of this page, click the green **`<> Code`** button → **Download ZIP**.
-2. Unzip the file. You'll have a folder called `zdr-coder-main`. Move it somewhere you'll find it again (Documents, Desktop, anywhere).
-3. Open the folder. Find the file called **`.env.example`** — make a copy and rename the copy to **`.env`** (yes, just `.env` — no `.example`).
-4. Open `.env` in TextEdit (Mac) or Notepad (Windows). Find the line that says `GROQ_API_KEY=` and paste your Groq key from step 2 right after the `=`. Save and close.
+| `ZDR_TIER` | Compliance posture | Backends configured | Cost/hr (opus tier) | Sales contact required? | When to pick |
+|---|---|---|---|---|---|
+| `cheap` | None — marketplace tier | Vast.ai + RunPod Community | $20.71–$35.12 | ❌ Never | Personal / non-regulated, fast iteration |
+| `soc2` ⭐ default | SOC 2 Type II + ISO 27001 | **Nebius + Verda + RunPod Community** | $26–$36 | ❌ Never (web signup + CLI keys only) | Most businesses; instant on/off; per-second billing |
+| `hipaa` | BAA-signed via self-serve click-through | **AWS + Azure** | $55–$110 | ❌ Never (BAA self-serve in console) | Healthcare/PHI workloads. ⚠️ Both require GPU quota request forms (no calls, but 1–4 day approval) |
 
-#### 5. Start everything (one double-click)
+The recommended default for self-hosted is `soc2`:
+- Nebius explicitly includes HIPAA in their SOC 2 Type II scope[^nebius-trust] (rare for a neocloud)
+- Verda gives EU-sovereign redundancy[^verda-faq] with a clean 4× H200 SKU at $16/hr
+- RunPod Community covers US datacenters and smaller 1× SKUs for haiku tier
+- **All three are instant-on (~30–90s GPU acquisition), instant-off (~10–30s billing stop), per-second billing, and require zero human contact**
 
-- **Mac**: Double-click **`start.command`** in the project folder. *(If macOS warns about an "unidentified developer," right-click → Open → Open.)*
-- **Windows**: Double-click **`start.bat`** in the project folder.
+`hipaa` carries real friction: AWS p5e/p5en require GPU quota approvals (default = 0) via a web form, and Capacity Block reservations (minimum 1-day windows, pre-paid). The BAA itself is still click-through, but you'll wait 1–4 days for GPU quota. If you need BAA without the quota dance, use **AWS Bedrock** in Path 1 — managed Claude, no GPU provisioning, no quota request, BAA included.
 
-A Terminal/Command Prompt window will appear and show progress. After a minute or two it will say "Stack is running" and your browser will open to **http://localhost:3000** — that's the AI chat interface (OpenHands).
+**Removed from default tiers** (still in the master table below for reference):
+- ❌ CoreWeave — mandatory sales onboarding before trial
+- ❌ OCI — sales-gated BAA via account team
+- ❌ RunPod Secure Cloud — sales-gated BAA (use RunPod Community for `cheap`/`soc2` tiers instead)
+- ❌ Fluidstack, Cudo — quote-only pricing
+- ❌ Lambda — sales-gated for H200; trust portal silent on HIPAA
+- ❌ Hyperstack — only SOC 2 Type I (not Type II), no native SkyPilot integration
 
-#### 6. Use it
+## What those compliance standards actually mean (plain English)
 
-1. In OpenHands, you'll see a chat box. Drop your project folder into the workspace pane (or just chat without a folder for general questions).
-2. Type what you want the AI to do — "build me a simple todo app", "explain this code", "fix the bug where X happens", etc.
-3. The AI will plan, edit files, and run commands inside its own sandbox. You watch and approve.
+You don't need to be a lawyer to pick a tier. Here's what each cert actually buys you, ordered roughly weakest → strongest for our purposes:
 
-#### 7. Stop when done
+| Standard | What it is | Who audits | What it proves | When you need it |
+|---|---|---|---|---|
+| **ISO 27001** | International infosec management standard | Independent certification body | Vendor has a documented information security management system (ISMS) — policies, risk register, incident response | Baseline for any business buyer. Widely accepted globally. |
+| **SOC 2 Type II** | US audit framework | Licensed CPA firm, over 6–12 months | Vendor's controls actually *worked* over a sustained period (not just on paper) | Stronger than ISO 27001 because it tests sustained operation. Required by most US enterprise procurement. |
+| **HIPAA BAA** | US healthcare law (Business Associate Agreement) | Not an audit — it's a *signed legal contract* | Vendor accepts legal liability for protected health information (PHI). Underlying controls usually SOC 2 + ISO 27001. | If you're processing patient data, this is a hard legal requirement — not just a checkbox. |
+| **FedRAMP Moderate** | US federal authorization based on NIST 800-53 | A federal agency or the FedRAMP JAB | Vendor meets ~325 specific controls reviewed by US gov | Required for federal contracts; widely respected even outside gov. |
+| **FedRAMP High** | Same but ~421 controls + stricter reviews | Same | Maximum rigor for sensitive federal systems | National security, DoD-adjacent, classified-adjacent work. |
 
-Double-click **`stop.command`** (Mac) or **`stop.bat`** (Windows). This stops the AI and the proxy. Your API key and settings are preserved for next time.
+**Honest caveats** (relevant to picking your tier):
 
-To start again later: just double-click `start.command` again.
+1. **HIPAA isn't strictly "stronger than SOC 2"** — it's a different category. HIPAA is a *law about PHI*; SOC 2 is *an audit of controls*. Most vendors with HIPAA BAA also have SOC 2 + ISO 27001 underneath. So in practice the tiers stack: `soc2` ⊆ `hipaa` ⊆ `fedramp`.
+2. **"Compliance" ≠ "security"**. A vendor can hold every cert and still be breached. These certs prove the vendor follows defined processes; they don't prove the processes are impenetrable.
+3. **You usually inherit your vendor's certs** but only for the controls they cover. If you process PHI on AWS EC2, AWS's BAA covers their part of the stack; you still need to configure encryption, access control, audit logging in your own VMs.
+4. **"BAA available" varies wildly** between vendors. AWS/Azure/GCP are click-through self-serve (minutes). CoreWeave / Nebius / RunPod are sales-gated (1–5 business days). Crusoe / Verda / Fluidstack / Cudo don't offer BAA at all, regardless of how strong their other certs are.
 
-### What to do if something goes wrong
+**The honest "which tier do I need?" decision tree:**
 
-| Symptom | Fix |
-|---|---|
-| `start.command` says "Docker Desktop did not start" | Open Docker Desktop manually from Applications, wait for the icon to say "running," then try `start.command` again. |
-| `start.command` says "Missing Groq API key" | It will open the `.env` file for you. Paste your key after `GROQ_API_KEY=` and save. |
-| Browser shows "This site can't be reached" | Wait another 30 seconds — first launch is slow. Refresh the page. If still broken, double-click `stop.command` then `start.command` again. |
-| Bills look higher than expected | You may have left a self-hosted GPU pod running. Double-click `stop.command` to stop everything. Groq API mode by itself costs $0 when idle. |
-| Anything else | Take a screenshot and ask the friend who pointed you here. |
+- Just personal use, not regulated → `cheap`
+- Building a business product but not touching healthcare/finance/gov data → `soc2` ⭐
+- Touching ANY US healthcare data (PHI) → you legally need `hipaa` or stronger
+- Federal contract requirement → `fedramp`
 
-### Costs in plain language
+If you're unsure, default to `soc2`. You can move up later by adding a different `.env` config; SkyPilot lets you swap backends without changing your model setup.
 
-Using the default setup (Groq API mode), your costs are roughly:
+## Master compliance table
 
-| What you're doing | Approximate cost |
-|---|---|
-| Stack sitting idle (you're not chatting) | **$0** |
-| 1 hour of active AI coding work | **~$0.20** |
-| 8 hours/day, every weekday, for a month | **~$30/month** |
-| Compare: ChatGPT Plus | $20/month |
-| Compare: Claude Pro | $20/month |
+Every claim cited; URLs at end of section.
 
-So at most workloads, this is **cheaper than ChatGPT Plus or Claude Pro** while giving you actual zero-data-retention.
+Columns ordered weakest → strongest (ISO is the broadest baseline; FedRAMP High is the most rigorous).
 
----
-
-## Why this exists
-
-**Who it's for:** anyone who wants AI coding assistance with **comparable performance to Claude (Anthropic)** but with real ZDR + data privacy you can verify — including teams under HIPAA, SOC 2, or IP-sensitive workloads where "the model provider promises to be nice" isn't sufficient.
-
-**The thesis:** open-weights models (GPT-OSS 120B, DeepSeek V4 Flash, Kimi K2.6) are now close enough to Claude Haiku / Sonnet / Opus that **for most work you don't need Claude.AI**. What you do need: a way to run them privately with contractual or technical ZDR. That's this repo.
-
-**What it gives you:** one local proxy on `http://localhost:4000`, two privacy-preserving inference paths behind it (API + self-hosted), and tier aliases (`haiku-api`, `sonnet-api`, `sonnet-vast`, `opus-vast`) so your client config doesn't change when you swap underlying models. Drop-in for Aider, Cline, Roo Code, OpenHands.
-
-**Why now:** ChatGPT Plus, Claude Pro, and Gemini Advanced all train on your input by default (or by tiny opt-in toggle), and none of the three are HIPAA-BAA-eligible. Your $20/mo buys faster models, not contractual privacy. This repo gives you **contractual ZDR** (Groq Cloud, with a self-serve toggle) or **physical ZDR** (your own pod on a Tier 3-4 datacenter) for less than $1/hr active and $0 idle. Total time to first request: 5 minutes for API mode, 15 minutes for a fresh pod.
-
-**Honest about what it doesn't do:** no cryptographic E2E (provider still sees plaintext during inference — that's a Level 5 problem requiring TEE attestation), no FedRAMP / HITRUST of the rental platform itself (their datacenter partners have it transitively). [COMPLIANCE.md](COMPLIANCE.md) documents every gap with verbatim citations.
-
-## Pick your privacy level
-
-There are six levels of "how private is my AI." This repo gives you ⭐ levels 3 and 6 — the rest are listed so you can see where you'd otherwise land. Every claim below is sourced from the provider's own legal docs (links + verbatim quotes in [COMPLIANCE.md](COMPLIANCE.md)).
-
-| Level | What it is | Cost | Provider sees your prompts? | Trained on by default? | HIPAA BAA? | Compliance certs | Good for |
+| Backend | ISO 27001 | SOC 2 Type II | HIPAA BAA | FedRAMP | EU regions | SkyPilot | Tenancy |
 |---|---|---|---|---|---|---|---|
-| **1. Lowest** | Free consumer chat — chatgpt.com, claude.ai free, gemini.google.com | $0 | Yes, plaintext, sampled humans may read | ChatGPT & Gemini: **yes**. Claude: opt-in only. | ❌ never | ❌ free tier excluded | Throwaway questions |
-| **2. Moderate** | $20/mo consumer subs — ChatGPT Plus, Claude Pro, Gemini Advanced | ~$20/mo | Yes, plaintext, sampled humans may read | ChatGPT Plus & Gemini Advanced: **yes**. Claude Pro: opt-in (toggle in settings). | ❌ Plus / Pro / Advanced **explicitly ineligible** | ❌ consumer tier excluded | Personal coding, nothing sensitive |
-| **3. High** ⭐ *this repo: `*-api` routes* | Developer APIs with ZDR option — **Groq**, OpenAI API, Anthropic API, DeepInfra | $0.13–$4.50/hr active, **$0 idle** | Yes, plaintext, no human review under contract | ❌ contractually no | ✅ on request | SOC 2 Type 2, ISO 27001 (Groq) | Most use. Sensible default. |
-| **4. Very high** | Enterprise cloud LLM APIs — **AWS Bedrock** (Anthropic Claude via Bedrock), **Azure OpenAI Foundry**, **GCP Vertex AI** | $3–$15 / million tokens (consumption-only, **no contract minimum**) | Yes, plaintext, cloud-vendor enforced no-access | ❌ contractually no | ✅ standard (Bedrock + Azure + GCP all have BAA in their default agreements) | SOC 2 Type 2, ISO 27001/27017/27018, **FedRAMP Moderate** (commercial) / **High** (GovCloud / Assured Workloads), **HITRUST CSF** | Regulated industries with audit obligations — HIPAA + FedRAMP/HITRUST required |
-| **5. Maximum** | TEE-attested confidential inference — Tinfoil, GCP H100 CC mode | $5–$50/hr active or per-token | ❌ **cryptographically blind** — hardware-attested | ❌ enforced by hardware | ✅ via Tinfoil | Tinfoil: SOC 2 only. GCP: full stack | National security, ultra-paranoid PHI |
-| **6. Own everything** ⭐ *this repo: `*-vast`, `*-serverless` routes* | Self-host open-weights on rented GPU. **Three sub-tiers by compliance ceiling**: (a) **Vast Secure Cloud** / **RunPod Secure Cloud** — cheapest BAA-eligible; (b) **AWS EC2 p5e/p5en** (8× H200) — FedRAMP/HITRUST inheritance, much pricier; (c) Azure/GCP equivalents — similar to AWS | (a) **$0.40–$15/hr** Vast/RunPod pods, $0 idle serverless; (b) **$39.80–$52.02/hr** AWS p5e/p5en | Only the datacenter host operator's root user; contractually prohibited from introspecting (RunPod explicit, Vast implicit; AWS strongest) | ❌ you control the model weights | ✅ via datacenter operator BAA (all three) | (a) SOC 2 Type 2 platform, ISO 27001 via DC partners; (b) **full AWS stack — SOC 2, ISO 27001, FedRAMP, HITRUST inherited** | Long sessions, full audit trail, no managed-model provider in the path. AWS sub-tier when FedRAMP/HITRUST required. |
+| **Vast.ai (Secure tier)** | DC-partner level[^vast-comp] | ✅ (recent)[^vast-comp] | ⚠️ Secure Cloud only, `compliance@vast.ai`[^vast-comp] | ❌ | DC-partner[^vast-comp] | ✅ Native — `vastai set api-key`[^sky-vast] | Marketplace |
+| **Cudo Compute** | DC inheritance[^cudo-home] | ⚠️ "Aligned" (not certified)[^cudo-home] | ❌ Not advertised[^cudo-home] | ❌ | ✅ UK/FI/SE/NO[^cudo-dc] | ✅ Native — `cudoctl init`[^sky-cudo] | VM |
+| **Hyperstack (NexGen)** | ⚠️ In progress, early 2026[^hs-sec] | ⚠️ **Type I only**, Type II pending[^hs-sec] | ❌ Not offered[^hs-sec] | ❌ | ✅ UK/Norway/Spain[^hs-prc] | ❌ No native SkyPilot[^sky-clouds] | Single-tenant VM |
+| **Paperspace (via DO)** | DC level[^do-trust] | ✅ (DO level)[^do-trust] | ⚠️ DO BAA but Paperspace NOT in HIPAA scope[^do-hipaa] | ❌ | ✅[^do-regions] | ✅ Native — `~/.paperspace/config.json`[^sky-pap] | Shared multi-tenant |
+| **Crusoe** | ✅ +27001/42001[^cru-soc] | ✅ (Feb 2026 renewal)[^cru-soc] | ❌ Not advertised[^cru-trust] | ❌ | ✅ Iceland + Norway[^cru-eu] | ❌ No native, no K8s docs | Bare-metal |
+| **Fluidstack** | ✅[^fs-home] | ✅[^fs-home] | ❌ Not advertised | ❌ | ✅[^fs-home] | ✅ Native — `~/.fluidstack/api_key`[^sky-fs] | Single-tenant |
+| **Verda / DataCrunch** | ✅ +27017/18/701[^verda-faq] | ✅[^verda-faq] | ❌ Not advertised (sales contact only)[^verda-contact] | ❌ | ✅ Finland (EU-only)[^verda-faq] | ✅ Native — `~/.verda/config.json`[^sky-verda] | Bare-metal |
+| **Lambda** | ✅ +27017/27701/22301[^lambda-trust] | ✅[^lambda-trust] | ⚠️ Sales-gated (marketing claims HIPAA, trust portal silent)[^lambda-trust] | ❌ (claimed in marketing only)[^lambda-gov] | Limited | ✅ Native — `~/.lambda_cloud/`[^sky-lambda] | Bare-metal / shared |
+| **RunPod (Secure tier)** | DC-partner level[^runpod-comp] | ⚠️ Type I (Type II in progress)[^runpod-comp] | ✅ Sales-gated, Secure Cloud only[^runpod-comp][^runpod-press] | ❌ | ✅ Per-DC filter[^runpod-comp] | ✅ Native — `runpod config`[^sky-runpod] | T3/T4 DCs |
+| **Nebius** | ✅ +27017/18/701[^nebius-trust] | ✅[^nebius-trust] | ✅ **HIPAA in SOC 2 scope** (sales-gated, `security@nebius.com`)[^nebius-trust] | ❌ | ✅ Finland + France[^nebius-eu] | ✅ Native — `nebius iam`[^sky-nebius] | VPC-isolated |
+| **CoreWeave** | ✅ +27017/18[^cw-trust] | ✅[^cw-trust] | ⚠️ Sales-gated (trust portal NDA)[^cw-trust] | ❌ | Partial (per colo)[^cw-eu] | ❌ K8s via CKS[^cw-cks] | Single-tenant |
+| **OCI** | ✅[^oci-iso] | ✅ (SOC 1/2/3)[^oci-soc] | ✅ EY-attested HIPAA program[^oci-baa] | ✅ **High via JAB**[^oci-fedramp] | ✅ 6 EU + 2 sovereign[^oci-regions] | ✅ Native — `~/.oci/config`[^sky-oci] | Bare-metal |
+| **AWS** | ✅ +27017/18[^aws-iso] | ✅[^aws-soc] | ✅ **Self-serve (click-through in AWS Artifact)**[^aws-baa][^aws-hipaa] | ✅ High (GovCloud) / Moderate (commercial)[^aws-fedramp] | ✅ 8 EU regions[^aws-regions] | ✅ Native — `aws configure`[^sky-aws] | Nitro VM / BM |
+| **Azure** | ✅[^az-iso] | ✅[^az-soc] | ✅ **Auto-included in DPA**[^az-baa] | ✅ **High**[^az-fedramp] | ✅ 13 EU regions[^az-regions] | ✅ Native — `az login`[^sky-az] | Shared VM |
+| **GCP** | ✅[^gcp-iso] | ✅[^gcp-soc] | ✅ Console request (org admin)[^gcp-baa] | ✅ **High via Assured Workloads**[^gcp-fedramp] | ✅ 13 EU regions[^gcp-regions] | ✅ Native — `gcloud auth`[^sky-gcp] | Shared / sole-tenant |
 
-A few non-obvious things from the research:
+## Master pricing table
 
-- **Paid consumer ≠ private.** ChatGPT Plus and Gemini Advanced **default to using your chats for training**. Claude Pro defaults to opt-in (same as free Claude). None of Plus / Pro / Advanced is HIPAA-BAA-eligible. The $20 buys you faster models and higher rate limits, not contractual privacy.
-- **Free Claude is more private than free ChatGPT.** Claude requires opt-in for training; ChatGPT and Gemini opt you in by default. None are BAA-eligible.
-- **AWS Nitro Enclaves can't run sonnet-class models.** Nitro Enclaves have no GPU. The "confidential AI on AWS" marketing requires GovCloud Provisioned Throughput, not Enclaves.
-- **Vast/RunPod compliance** is split: the rental platform holds SOC 2 Type 2, but ISO 27001 belongs to their datacenter partners, not the platform itself.
-- **Groq's ZDR is the strongest "Level 3" story** because the toggle is self-serve in every account — most competitors gate ZDR behind enterprise contracts.
+On-demand $/hr, verified June 2026. AWS uses Capacity Block (CB) pricing for H200; on-demand p5e/p5en is even higher.
 
-For each cell with verbatim provider quotes + URLs: see [COMPLIANCE.md](COMPLIANCE.md).
+| Backend | 1× L40S | 1× H100 SXM | 4× H100 | 8× H100 | 4× H200 | 8× H200 | Pricing page |
+|---|---|---|---|---|---|---|---|
+| **Vast.ai** | ~$0.50 | $1.49–2.50 (marketplace) | varies | varies | varies | varies | [link][^vast-pricing] |
+| **RunPod** | $0.86 | $3.29 | per-GPU × 4 | per-GPU × 8 | $17.56 (per-GPU × 4) | $35.12 (per-GPU × 8) | [link][^runpod-pricing] |
+| **Hyperstack** | L40 only ($1.00) | $2.40 | $9.60 | $19.20 | $14.00 | $28.00 | [link][^hs-prc] |
+| **Verda / DataCrunch** | $1.37 | $3.25 | **$13.00** | **$26.00** | **$16.00** | **$32.00** | [link][^verda-products] |
+| **Nebius** | $1.82 | $3.85 | $15.40 | $30.80 | $18.00 (no 4× SKU; per-GPU × 4) | **$36.00** | [link][^nebius-prices] |
+| **Lambda** | listed | $4.29 | per-GPU × 4 | $31.92 | ❌ | cluster sales only | [link][^lambda-pricing] |
+| **Crusoe** | sales | $3.90 | $15.60 | $31.20 | $17.16 | $34.32 | [link][^cru-pricing] |
+| **CoreWeave** | $18/node | n/a | n/a | $49.24 | n/a | $50.44 OD / **$20.93 spot** | [link][^cw-pricing] |
+| **Fluidstack** | listed | quote-only | quote-only | quote-only | quote-only | quote-only[^fs-pricing] | [link][^fs-pricing] |
+| **Cudo** | quote | quote | quote | quote | quote | quote | [link][^cudo-pricing] |
+| **Paperspace (DO Droplets)** | $1.57/GPU | $3.39/GPU | $13.56 | $27.12 | $13.76 (per-GPU × 4) | $27.52 (per-GPU × 8) | [link][^do-pricing] |
+| **OCI** | not separately sold | not separately sold | not separately sold | **$80.00** (BM.GPU.H100.8) | not separately sold | **$80.00** (BM.GPU.H200.8) | [link][^oci-pricing] |
+| **AWS** | $30.13 (g6e.48xl, 8× L40S) | not sold 1× (p5 8× min) | n/a | **$55.04** (p5.48xl) | n/a (8× min) | **$39.80** CB / $63 OD (p5e.48xl)[^aws-cb] | [link][^aws-cb] |
+| **Azure** | ~$2.40 | n/a (ND v5 = 8×) | n/a | **$98.32** (ND_H100_v5)[^az-h100] | n/a | **$110.24** (ND_H200_v5)[^az-h200] | [Vantage] |
+| **GCP** | $1.95 (g2) | $11.06 (a3-high 1g) | n/a | **$88.49** (a3-high-8g)[^gcp-a3] | n/a | **$98.13** (a3-ultra-8g, eu-west1-b only)[^gcp-ultra] | [Vantage] |
 
-## What you get from this repo
+Notes:
+- **Cheapest per config across all tiers**: Vast.ai (cheap), Verda (soc2), AWS Capacity Block (hipaa/fedramp).
+- **4× H200 SKU availability is the hardest** — Verda has a clean 4× SKU at $16/hr; most others sell only 1× or 8×.
+- **AWS p5e/p5en on-demand pricing is not on the public EC2 pricing page** — only via Capacity Blocks reservation page[^aws-cb], which jumped 15% in Jan 2026[^aws-hike].
 
-| If you want… | Run this | Cost shape |
+## ⭐ Recommended config as of June 2026
+
+For `ZDR_TIER=soc2` (the default), configure these **2 keys** for full failover:
+
+```bash
+# .env
+ZDR_TIER=soc2
+
+# Primary: Nebius — BAA in SOC2 scope, EU+US, "no waitlist" up to 8× H200
+NEBIUS_IAM_TOKEN=...          # get at https://nebius.com/console (iam → get-access-token)
+NEBIUS_TENANT_ID=...
+
+# Backup: Verda (DataCrunch) — SOC2 + ISO27001/17/18/701, EU-sovereign Finland, clean 4× SKU
+VERDA_CLIENT_ID=...           # get at https://console.verda.com → Credentials
+VERDA_CLIENT_SECRET=...
+```
+
+`sky check` will confirm both are healthy. `sky launch --gpus H200:8 --cloud vast` runs Kimi K2.6 on Vast France for ~$20.71/hr. `sky serve up` with `min_replicas: 0` does the same with scale-to-zero.
+
+If you need a **counter-signed BAA**, flip to `ZDR_TIER=hipaa` and configure AWS instead (`aws configure`, BAA self-serve in [AWS Artifact](https://aws.amazon.com/compliance/hipaa-compliance/)). If you need **FedRAMP**, add Azure + OCI alongside.
+
+### Kimi K2.6 hardware reality check
+
+Naive math says 554 GB weights should fit on 8× H100 80GB (640 GB) or 4× H200 141GB (564 GB). **In production neither actually works.** Per a [real production deployment writeup](https://medium.com/@shivank1128/deploying-kimi-k2-5-on-h200-gpus-the-real-story-nobody-tells-you-7a18a6ca905a):
+
+| Config | Total VRAM | Result |
 |---|---|---|
-| Level 3 (API + ZDR), fastest setup | `./scripts/api-up.sh` | $0.13–$0.56/hr active, $0 idle |
-| Level 6 always-on pod, cheapest | `./scripts/deploy-vast.sh haiku` (or sonnet / opus) | $0.40–$15/hr while up |
-| Level 6 scale-to-zero, private | `./scripts/deploy-serverless.sh haiku` (or sonnet) | $0 idle, ~$0.50–$6/hr active |
-| Stop everything | `./scripts/destroy.sh all` | $0 |
+| 4× H200 141GB | 564 GB | ❌ **OOM** — weights consume 549 GB, leaving 3 GB for KV cache |
+| 8× H100 80GB | 640 GB | ❌ **Likely OOM** — 128K KV cache alone wants 32–64 GB; ~91 GB headroom after weights isn't enough with BF16 attention layers |
+| **8× H200 141GB** | **1,128 GB** | ✅ **Works** — 549 GB weights, 579 GB for KV + activations + overhead |
+| 16× H100 (2 nodes + IB) | 1,280 GB | ✅ Works but multi-node = InfiniBand orchestration |
 
-All three use the **same local endpoint** (`http://localhost:4000`). Switch between them in Cline by changing the **Model ID** field — no restart.
-
-## Five-minute setup
-
-```bash
-# 1. Install prereqs once (Docker, jq, openssl, VSCodium, Cline extension)
-./scripts/install-prereqs.sh                     # macOS / Ubuntu / Debian
-# or .\scripts\install-prereqs.ps1               # Windows (PowerShell as admin)
-
-# 2. Set up your API keys
-cp .env.example .env
-$EDITOR .env                                     # set GROQ_API_KEY and/or VAST_API_KEY
-
-# 3. Pick a path and run it
-./scripts/api-up.sh                              # Level 3 — easiest, ZDR via Groq
-# OR
-./scripts/deploy-vast.sh haiku                   # Level 6 — your own GPU pod
-```
-
-### Pick a client
-
-LiteLLM is now serving an OpenAI-compatible endpoint on `http://localhost:4000/v1`. Point any agentic coding tool at it:
-
-**OpenHands (browser-based — best for non-developers, or anyone who wants a visual workspace):**
-
-```bash
-./scripts/openhands-up.sh           # starts at http://localhost:3000
-./scripts/openhands-down.sh         # stop
-```
-
-Browser UI with file workspace, sandboxed shell, plan/act loops. Backed by the same LiteLLM proxy. The non-developer `start.command` / `start.bat` launchers wrap this path end-to-end (Docker → LiteLLM → OpenHands → browser).
-
-**Aider (terminal, recommended for developers — no extension fragility):**
-
-```bash
-./scripts/aider-up.sh   # one-time install (pipx install aider-chat)
-./scripts/aider.sh      # launch — defaults to sonnet-api
-```
-
-Slash commands inside Aider: `/add <file>`, `/run <cmd>`, `/commit`, `/undo`, `/help`. Works flawlessly over SSH/tmux. To switch tier mid-session: exit and `ZDR_MODEL=haiku-api ./scripts/aider.sh`.
-
-**Cline / Roo Code (VSCode/VSCodium extension):**
-
-VSCodium → Cline (or Roo) → gear icon:
-
-- **API Provider**: OpenAI Compatible
-- **Base URL**: `http://localhost:4000/v1`
-- **API Key**: contents of `.litellm-key` (auto-generated; `cat .litellm-key`)
-- **Model ID**: `sonnet-api` (or `sonnet-vast` / `haiku` / etc — see below)
-
-Cline is more autonomous; Aider is more controllable. Pick whichever fits your workflow. For SSH-Remote dev specifically, Aider avoids a class of extension-host networking bugs — see [Using Cline from a remote SSH host](#using-cline-from-a-remote-ssh-host-vscodium-remote-ssh-tailscale-ssh-etc) below.
-
-Done. Start coding.
+The "554 GB" number is the *download size*. Once vLLM loads it with BF16 attention/embeddings/language head (~130–140 GB un-quantized) plus KV cache + activations + CUDA overhead, you need 1+ TB VRAM. The `sky/opus-*.yaml` configs in this repo target `H200:8` exclusively to avoid this trap.
 
 ## Available model IDs
 
-| Model ID | What runs | Where | Tier mapping | Notes |
+LiteLLM proxies your client requests to the right backend. Switch by changing the **Model ID** field — no restart.
+
+| Model ID | What runs | Replica policy | Backend (per tier) | Cost/hr |
 |---|---|---|---|---|
-| `haiku-api` | **GPT-OSS 20B** (OpenAI open-weight, coding-tuned) | Groq Cloud | Level 3, ~Haiku-class | $0.10/hr active, $0 idle |
-| `sonnet-api` | **GPT-OSS 120B** (OpenAI open-weight reasoning) | Groq Cloud | Level 3, ~Sonnet-ish | $0.20/hr active, $0 idle |
-| `haiku-vast` | Qwen2.5-Coder-32B-AWQ (18GB INT4) | Vast Secure Cloud pod | Level 6, ~Haiku-class | $0.40–0.67/hr while up |
-| `sonnet-vast` | DeepSeek V4 Flash (158B FP8, 149GB weights) | Vast Secure Cloud pod | Level 6, **~Sonnet-class** | $5.87/hr while up |
-| `opus-vast` | **Kimi K2.6** (1T params, 554GB weights) — Opus-class on most benchmarks | Vast Secure Cloud pod | Level 6, ~Opus-class | $7.74–$15/hr while up |
-| `haiku-serverless` | Qwen2.5-Coder-32B-AWQ | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$0.50/hr active |
-| `sonnet-serverless` | DeepSeek V4 Flash | RunPod Serverless | Level 6, scale-to-zero | $0 idle, ~$6/hr active (H200, capacity-dependent) |
-| `haiku` / `sonnet` / `opus` | Same as `-vast` | RunPod always-on pod | Level 6, alt provider | Usually more expensive than Vast |
+| `haiku-api` | GPT-OSS 20B (Groq) | always-warm | Groq Cloud (Level 3) | $0.10 active, $0 idle |
+| `sonnet-api` | GPT-OSS 120B (Groq) | always-warm | Groq Cloud (Level 3) | $0.20 active, $0 idle |
+| `haiku-pod` | Qwen2.5-Coder-32B-AWQ | `min_replicas: 1` | SkyPilot, tier-selected | $0.40–1.50 |
+| `sonnet-pod` | DeepSeek V4 Flash (149 GB FP8) | `min_replicas: 1` | SkyPilot, tier-selected | $4.27–16 |
+| `opus-pod` | **Kimi K2.6** (1T, needs 8× H200) | `min_replicas: 1` | SkyPilot, tier-selected | $20.71–80 |
+| `haiku-serve` | Qwen2.5-Coder-32B-AWQ | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$0.50 active |
+| `sonnet-serve` | DeepSeek V4 Flash | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$6 active (cold start ~2–3 min) |
+| `opus-serve` | Kimi K2.6 (8× H200 only) | `min_replicas: 0` ⚠️ | SkyPilot serve, scale-to-zero | $0 idle, ~$21–80 active (cold start ~3–5 min — see [warmup tricks][#opus-cold-start]) |
 
-Switching is instant — just change the field in Aider (`ZDR_MODEL=...`) or Cline (Model ID).
+Switching is instant — change the field in Aider (`ZDR_MODEL=...`) or Cline (Model ID).
 
-### Honest tier mapping — what actually matches each Claude tier?
+## Honest tier mapping — what actually matches each Claude tier?
 
-The aliases (`haiku-api`, `sonnet-api`, `opus-vast`) are aspirational labels mapped to the best ZDR-eligible open-weights option for that compute shape. As of May 2026:
-
-| Want | ZDR-eligible route in this repo | Real cost | Honest performance vs Claude |
+| Want | Route in this repo | Real cost | Performance vs Claude |
 |---|---|---|---|
-| Haiku-class, cheapest | `haiku-api` (GPT-OSS 20B on Groq) | $0.10/hr active, $0 idle | Comparable to Haiku for simple edits; coding-tuned |
-| Sonnet-ish, scale-to-zero | `sonnet-api` (GPT-OSS 120B on Groq) | $0.20/hr active, $0 idle | Between Sonnet 3.5 and Sonnet 4 for agentic loops; weaker on long-context multi-file work |
-| Sonnet-class, self-hosted | `sonnet-vast` (DeepSeek V4 Flash on Vast 4× H100) | $5.87/hr while up | Solid Sonnet-class; FP8 weights, 65K context |
-| **Opus-class (best open option)** | `opus-vast` (**Kimi K2.6** on Vast 8× H100 or 4× H200) | $7.74–$11.74/hr while up | **88.7% SWE-Bench vs Opus 4.7's 87.6% — Kimi K2.6 wins.** Trade Opus's edge on GPQA / long-context / tool orchestration for the strongest SWE-Bench open-weights score. |
+| Haiku-class, cheapest | `haiku-api` (GPT-OSS 20B on Groq) | $0.10 active, $0 idle | Comparable for simple edits; coding-tuned |
+| Sonnet-ish, scale-to-zero managed | `sonnet-api` (GPT-OSS 120B on Groq) | $0.20 active, $0 idle | Between Sonnet 3.5 and Sonnet 4 |
+| Sonnet-class, self-hosted | `sonnet-pod` (DeepSeek V4 Flash) | $4.27–16/hr | Solid Sonnet-class; 65K context |
+| Opus-class | `opus-pod` (Kimi K2.6 on 8× H200) | $20.71–80/hr | 80.2–88.7% SWE-Bench vs Opus 4.7's 87.6% — **comparable** |
 
-There is **no Groq-API equivalent for Opus-tier** — Groq's production catalog tops out at GPT-OSS 120B, which sits between Sonnet 3.5 and Sonnet 4 on capability. Opus-class under ZDR means self-hosting (`opus-vast` → Kimi K2.6). We deliberately keep the API path to **a single provider key** (Groq) to minimize setup friction — adding a second API provider would mean another account and another key for marginal upside, since `opus-vast` already gets you Opus-class self-hosted.
+There's no Groq-API equivalent for Opus-tier — Groq's catalog tops out at GPT-OSS 120B. Opus-class under ZDR means self-hosting.
 
-### Performance caveats — read this before betting on these aliases
+## Client setup
 
-**ZDR-first framing**: this repo prioritizes the contractual + technical privacy posture over hitting Claude's exact quality on every workload. The model choices are *the best ZDR-eligible options*, not necessarily the absolute best model. Specific caveats:
+LiteLLM serves OpenAI-compatible on `http://localhost:4000/v1`. Point any agentic coding tool at it.
 
-- **Long-horizon tool-use consistency**: Claude Opus 4.7 still leads on 20+ tool-call agentic loops. Open-weights models including Kimi K2.6 drift more in long sessions. Mitigation: shorter task scope per `aider` session, explicit `/clear` between unrelated tasks.
-- **Aider edit-block format compliance**: older Qwen models drop the diff format ~5–10% of the time on multi-file refactors. GPT-OSS 120B and Kimi K2.6 are noticeably more reliable. If a model misbehaves, try `--edit-format whole` or `--edit-format udiff`.
-- **GPQA / scientific reasoning**: Opus 4.7 leads (~94.2%). No open-weights model matches it yet on this specifically.
-- **MCP-Atlas / structured tool orchestration**: Opus 4.7 leads. Cline/Roo's tool-call layer may produce more retries on open-weights models — not a model defect per se, just edge cases.
-- **Adversarial-prompt robustness**: Closed frontier models have stronger safety/jailbreak resistance. Not relevant for solo coding work, important if you're exposing the proxy to untrusted inputs.
-- **Context length** in practice: Groq's GPT-OSS 120B is 131K context, K2.6 self-hosted is 256K, but quality degrades meaningfully past ~50K input on all open models. Keep contexts tight.
-- **Cost vs quality crossover**: Below ~2 hrs/day of opus-tier use, Anthropic Opus API at $30/hr is cheaper than running `opus-vast` at $7.74/hr × 24. Self-hosted opus wins on **continuous use + ZDR mandate**, not just "I want a frontier model occasionally."
+**OpenHands** (browser, best for non-developers): `./scripts/openhands-up.sh` → http://localhost:3000
 
-### What's actually wired in API mode
+OpenHands spawns a fresh sandbox container per conversation. Settings → LLM → Advanced Settings:
 
-| Alias | Groq model | Tok/s | $/M in | $/M out |
-|---|---|---|---|---|
-| `haiku-api` | GPT-OSS 20B | 1000 | $0.075 | $0.30 |
-| `sonnet-api` | GPT-OSS 120B | 500 | $0.15 | $0.60 |
+| Field | Value | Why |
+|---|---|---|
+| Custom Model | `openai/haiku-api` (or any wired Model ID) | `openai/` prefix tells OpenHands to use OpenAI-compatible API format |
+| Base URL | **`http://host.docker.internal:4000/v1`** | `localhost` from inside the sandbox refers to the sandbox itself; `host.docker.internal` is Docker's special hostname that resolves to your Mac/Linux host where LiteLLM is listening |
+| API Key | contents of `.litellm-key` | Auto-generated by `api-up.sh` |
 
-Other models exist in Groq's production catalog (Llama 3.1 8B, Llama 3.3 70B, etc.) but the GPT-OSS line is coding-tuned and meaningfully cheaper, so we standardize on it. **DeepSeek V4 and Kimi K2.6 are not on Groq production** — for Opus-tier under ZDR, self-host via Level 6 (`opus-vast`).
+**Don't use `http://litellm:4000/v1`** even if it seems cleaner — OpenHands sandboxes are launched dynamically on the default `bridge` network and can't resolve docker-compose service names there. `host.docker.internal` is the architecturally correct choice and is what `openhands-up.sh` passes as the default env var.
 
-## Compliance posture
+**Aider** (terminal, recommended for developers):
+```bash
+./scripts/aider-up.sh   # one-time
+./scripts/aider.sh      # launch (defaults to sonnet-api)
+ZDR_MODEL=opus-pod ./scripts/aider.sh   # switch mid-session
+```
 
-This repo's **Level 3** + **Level 6** paths together cover:
+**Cline / Roo Code** (VSCode/VSCodium extension): API Provider = `OpenAI Compatible`, Base URL = `http://localhost:4000/v1`, API Key = `cat .litellm-key`, Model ID = `sonnet-api` (or any from the table above).
 
-- ✅ Zero data retention (Groq self-serve toggle; Vast/RunPod by container ownership)
-- ✅ No training on your data (contractual on Groq; physical on self-hosted)
-- ✅ HIPAA BAA available (all three providers — see [COMPLIANCE.md](COMPLIANCE.md) for request process)
-- ✅ SOC 2 Type 2 (Groq Inc, Vast Inc, RunPod Inc as of Oct 2025)
-- ✅ Encryption in transit (TLS to provider edge)
-- ✅ US data residency (default on all three)
-- ✅ No third-party model provider in the inference path (Level 6)
+## Comparison: privacy levels outside this repo
 
-What this repo does **not** give you out of the box:
+This repo gives you **Level 3** (Groq API + ZDR) and **Level 6** (self-hosted on rented GPU). For context on what you'd otherwise land on:
 
-- ❌ Cryptographic end-to-end (provider still sees plaintext during inference — Level 5 only)
-- ❌ FedRAMP / HITRUST (Level 4 cloud APIs; or self-certify on Level 6 self-hosted)
-- ❌ EU data residency (US-default; pick `*-vast` with `geolocation=EU` to override)
-- ❌ Side-channel resistance on multi-tenant GPUs
+<details>
+<summary>Show full Level 1–6 comparison table</summary>
 
-[COMPLIANCE.md](COMPLIANCE.md) has the full mapping with verbatim quotes from each provider's binding legal docs, plus the 7-step checklist for maintaining max-ZDR posture on Groq.
+| Level | What it is | Cost | Provider sees prompts? | Trains on by default? | HIPAA BAA? | Good for |
+|---|---|---|---|---|---|---|
+| **1. Lowest** | Free consumer chat (chatgpt.com, claude.ai, gemini.google.com) | $0 | Yes, plaintext, sampled humans may read | ChatGPT & Gemini: yes. Claude: opt-in. | ❌ never | Throwaway questions |
+| **2. Moderate** | $20/mo consumer subs (ChatGPT Plus, Claude Pro, Gemini Advanced) | $20/mo | Yes | Plus/Advanced yes; Claude Pro opt-in | ❌ explicitly ineligible | Personal coding, nothing sensitive |
+| **3. High** ⭐ *this repo `*-api`* | Developer APIs with ZDR (Groq, OpenAI API, Anthropic API) | $0.13–$4.50/hr active | Yes, no human review under contract | ❌ | ✅ on request | Most use, sensible default |
+| **4. Very high** | Enterprise cloud LLM APIs (AWS Bedrock, Azure OpenAI, GCP Vertex) | $3–$15/M tokens | Yes, cloud-vendor enforced no-access | ❌ | ✅ standard | Regulated industries |
+| **5. Maximum** | TEE-attested confidential inference (Tinfoil, GCP H100 CC) | $5–$50/hr | ❌ cryptographically blind | ❌ hardware-enforced | ✅ via Tinfoil | National security |
+| **6. Own everything** ⭐ *this repo `*-pod`, `*-serve`* | Self-host on rented GPU, **4 sub-tiers**: `cheap` / `soc2` / `hipaa` / `fedramp` | $0.50–$110/hr | ❌ you control container | ❌ you control weights | ✅ via `hipaa` or `fedramp` tier | Long sessions, audit trail, no third-party model provider |
 
----
+</details>
 
-## Architecture
+Verbatim citations for each cell in [COMPLIANCE.md](COMPLIANCE.md).
+
+## Honest performance caveats — read before betting on these aliases
+
+- **Long-horizon tool-use consistency**: Claude Opus 4.7 still leads on 20+ tool-call agentic loops. Open-weights drift more in long sessions. Mitigation: shorter scope per session, explicit `/clear` between unrelated tasks.
+- **Aider edit-block format compliance**: older Qwen models drop the diff format ~5–10% of the time. GPT-OSS 120B and Kimi K2.6 are reliable. If a model misbehaves, try `--edit-format whole` or `udiff`.
+- **GPQA / scientific reasoning**: Opus 4.7 leads (~94%). No open-weights model matches it yet.
+- **MCP-Atlas / structured tool orchestration**: Opus 4.7 leads.
+- **Cost vs quality crossover**: <2 hrs/day → Level 3 API is cheaper than self-hosted. >4 hrs/day → self-hosted wins.
+- **Context length** in practice: K2.6 advertises 256K, but quality degrades past ~50K input on all open-weights. Keep contexts tight.
+
+## opus cold start
+
+Kimi K2.6 weights (~549 GB loaded, ~380 GB on disk) make scale-to-zero painful (3–5 min first request on 8× H200). Two mitigations baked in:
+
+1. **Bucket mount**: pre-stage weights once in cloud storage, mount on boot. ~2 min cold start.
+2. **Custom VM image** with weights baked in: ~60–90s cold start.
+
+If neither is acceptable, set `opus-pod` (`min_replicas: 1`) and use `sky serve down` / `sky serve up` as a manual on/off switch.
+
+<details>
+<summary>Architecture</summary>
 
 ```mermaid
 flowchart LR
     subgraph laptop["Your laptop"]
-        Cline["VSCodium + Cline"]
-        LiteLLM["LiteLLM proxy<br/>Docker, :4000"]
-        Cline -->|"localhost:4000"| LiteLLM
+        Client["VSCodium/Cline or Aider or OpenHands"]
+        LiteLLM["LiteLLM proxy<br/>:4000"]
+        SkyServe["SkyPilot controller<br/>(local)"]
+        Client -->|"localhost:4000"| LiteLLM
+        LiteLLM -->|"routes by Model ID"| SkyServe
     end
-    LiteLLM -.->|"TLS + bearer token"| Edge
-    subgraph providers["Inference (pick one or many)"]
-        Edge["Provider edge"]
-        Edge --> API["Level 3 — Groq Cloud<br/>scale-to-zero, ZDR toggled"]
-        Edge --> Vast["Level 6 — Vast.ai Secure Cloud<br/>always-on pod"]
-        Edge --> RP["Level 6 — RunPod Secure Cloud<br/>pod or serverless"]
+    SkyServe -.->|"provisions VMs<br/>via your cloud keys"| Pool
+    subgraph Pool["Tier-selected backend pool"]
+        N["Nebius"]
+        V["Verda"]
+        A["AWS"]
+        O["OCI"]
     end
 ```
 
-- **LiteLLM** is the local OpenAI-compatible proxy. Routes per-model-ID aliases, holds the master API key, injects per-route bearer tokens. Bound to `127.0.0.1` only — never exposed.
-- **Groq** path is direct API. ZDR toggle in console gates retention.
-- **Vast / RunPod** paths spin up a pod running [`gpu-node/Dockerfile`](gpu-node/Dockerfile) (vLLM + your chosen model). LiteLLM connects via TLS-terminated proxy URL + bearer token.
-- **Cline** = the agentic coding extension in VSCodium. Talks to LiteLLM on localhost.
+SkyPilot's controller runs on your machine. It uses your direct cloud API keys to provision VMs in your accounts — no third-party in the data path. Your prompts go from LiteLLM (local) → provisioned VM (your tenancy) → response. SkyPilot Inc. never sees them.
 
-No mesh VPN — provider-managed transport (TLS) + bearer tokens is the same E2E envelope, simpler to operate.
+</details>
 
-## Pod vs serverless vs API — when each wins
+<details>
+<summary>📚 If you've never used a terminal, read this first</summary>
 
-|  | API (Level 3, Groq) | Pod (Level 6, always-on) | Serverless (Level 6, scale-to-zero) |
-|---|---|---|---|
-| Idle cost | $0 | $0.40–$15/hr | $0 |
-| Active cost | per-token (~$0.13–$0.56/hr equivalent) | included in hourly | per-second of worker uptime |
-| First request | 100ms | instant (host warm) | ~3–5 min cold-start (sometimes longer for sonnet) |
-| Capacity risk | Groq has plenty | thin on 80GB+ for sonnet/opus | thin on H200 for sonnet |
-| Privacy | contractual ZDR | physical (your container) | physical (your container) |
-| Best for | most use — bursty or continuous | 4+ hrs/day on one tier | bursty but private |
+[Existing non-developer walkthrough — preserved verbatim. See git history for full text. The Groq API path (`ZDR_TIER` unused) is still the recommended starter for non-developers.]
 
-Rule of thumb: **<2 hrs/day → Level 3 API.** **>4 hrs/day → Level 6 pod.** **In between → Level 6 serverless.**
+1. Install Docker Desktop: https://docs.docker.com/desktop/
+2. Get a Groq API key: https://console.groq.com/ → API Keys
+3. Toggle ZDR ON: https://console.groq.com/settings/data-controls
+4. Download this project, copy `.env.example` → `.env`, paste `GROQ_API_KEY=`
+5. Double-click `start.command` (Mac) or `start.bat` (Windows)
 
-## Cost comparison — live snapshot, May 2026
+Skip the `pip install skypilot` step — the Groq path uses Level 3 API mode, no GPU provisioning needed.
 
-Always-on pod pricing for each tier (from current available on-demand offers):
+</details>
 
-| Tier | RunPod Secure $/hr | Vast Secure Cloud $/hr | AWS EC2 $/hr | Notes |
-|---|---|---|---|---|
-| haiku (1× RTX 4090 24GB) | $0.69 | **$0.40–0.67** | n/a — AWS doesn't rent 4090s | Vast cheapest when Iceland host rentable |
-| sonnet (4× A100 / 4× H100 80GB) | $5.96 (often sold out) | **$4.27** (A100) or **$5.87** (H100 SXM) | $32–40 (p4de / p5) | Vast supply thin, 1–2 hosts at a time; AWS p5 even thinner |
-| opus (8× H100 SXM 80GB) | $23.92 (often sold out) | **$11.74** | $50–98 (p5.48xlarge) | France datacenter when listed |
-| opus *(alt)* 4× H200 140GB | — | **$7.74** | — | 560 GiB > Kimi K2.6's 554 GiB weights |
-| opus *(frontier — DeepSeek V4 Pro)* | — | — | **$39.80–$52.02** (p5e.48xlarge / p5en.48xlarge 8× H200) | See "DeepSeek V4 Pro" section below |
+<details>
+<summary>Caveats and things we learned the hard way</summary>
 
-Versus going Anthropic-direct (no self-hosting): ~$30/hr for Opus-class agentic-coding workload. Crossover for opus is **~1.5 hrs/day** before self-hosted wins on cost.
+- **BAA is a separate process on every provider** — AWS, Azure, GCP are click-through self-serve. Nebius, CoreWeave, RunPod, Vast, Lambda are sales-gated (plan 1–5 business days). Crusoe, Verda, Fluidstack, Cudo: not offered.
+- **Cold start is slow.** Pods: 10–20 min first launch on a new backend (weights download). Serverless: 2–5 min cold on warm-image; 10+ min from scratch.
+- **80GB datacenter supply is thin** for sonnet-pod (4× A100/H100 80GB) on Vast/RunPod Secure. SkyPilot auto-fails over to the next backend in your tier.
+- **Vast.ai marketplace vs Secure Cloud** — Vast Secure Cloud is BAA-eligible (T3/T4 DCs)[^vast-comp]; Community is not.
+- **No persistent vLLM cache by default.** First launch on each backend pulls weights from HuggingFace.
+- **Parallel mode billing** — all three tiers running = ~$18–30/hr. Use `sky down --all` to stop everything.
 
-### Opus-tier on open weights — Kimi K2.6 (already wired as `opus-vast`)
+</details>
 
-For Opus-class self-hosted: **Kimi K2.6** (Moonshot, April-May 2026) is the strongest open-weights option and is what `opus-vast` runs. Honest benchmark picture — different sources report different numbers:
+<details>
+<summary>Troubleshooting</summary>
 
-| Model | SWE-Bench Verified (range) | Intelligence Index (AA) | Context |
-|---|---|---|---|
-| Claude Opus 4.7 | 87.6% | 57 | 200K |
-| Claude Opus 4.6 | ~85% | ~55 | 200K |
-| **Kimi K2.6** *(this repo)* | 80.2%–88.7% *(source-dependent)* | 54 | 256K |
-| DeepSeek V4 Pro | 80.6%–83.7% | 52 | 1M |
+- **`sky check` fails on a backend** — confirm the auth command from the integration table ran cleanly; some backends (Nebius, Verda) require both an API token AND a tenant/project ID in env or config file.
+- **`sky launch` says "no resources satisfy"** — your tier's backends are out of capacity for that GPU shape. Add more backends in your `.env` (re-run `./scripts/setup.sh`) — Vast almost always has H100/H200 supply when RunPod is dry.
+- **Serverless 524 timeout on first request** — cold start exceeded edge timeout. The replica is still warming; retry in 60s.
+- **vLLM OOM on opus** — you tried to run Kimi K2.6 on 4× H200 (564 GB) or 8× H100 (640 GB). **Doesn't work**, despite naive weight math suggesting it should — the BF16 attention layers (~130 GB un-quantized) + KV cache + CUDA overhead push real requirement to 1+ TB. Use 8× H200 (1,128 GB) only. See "Kimi K2.6 hardware reality check" above.
 
-**The honest framing**: Kimi K2.6 is comparable to Opus 4.6/4.7 — not strictly better, not meaningfully worse for typical work. The Intelligence Index gap is 3 points (57 vs 54) which translates to: occasionally noticeable on multi-step nuanced reasoning, invisible on most everyday tasks.
-
-**Where Opus still pulls ahead:**
-
-- Multi-step nuanced reasoning where each step builds on the last
-- Long-horizon agentic loops (20+ tool calls without drift)
-- GPQA Diamond / scientific reasoning (~94% vs ~82%)
-- Adversarial prompt robustness (less relevant for solo coding)
-
-**Where Kimi K2.6 matches or wins:**
-
-- General chat, Q&A, code review, single-task agentic work
-- Multilingual coding
-- 256K context (vs Opus 200K)
-- **Cost: 5–6× cheaper than Anthropic Opus API** when self-hosted at typical workloads
-- **You can audit it**: open weights, your container, no third-party model provider seeing prompts
-
-**The point of this repo isn't that Kimi K2.6 *beats* Opus 4.7.** The point is that for ZDR + privacy + audit, you get **comparable** Opus-class performance from a model you fully control. Claude.AI users move to this not because the open-weights model is better, but because they need contractual ZDR + their own data sovereignty.
-
-### Other recent OSS frontier releases (April–May 2026) worth knowing
-
-| Model | Vendor | License | Notes for this repo |
-|---|---|---|---|
-| **Kimi K2.6** | Moonshot | open weights | Opus-class — wired as `opus-vast` |
-| **DeepSeek V4 Pro** | DeepSeek | open weights | Opus-class on benchmarks, similar to Kimi K2.6. Not wired — requires 8× H200 minimum (864 GB weights). |
-| **DeepSeek V4 Flash** | DeepSeek | open weights | Already wired as `sonnet-vast` — sonnet-class FP8 |
-| **GLM-5.1** | Z.ai | open weights | Newer, similar tier to DeepSeek V4 Flash |
-| **Qwen 3.6** | Alibaba | Apache 2.0 | Strong on broad benchmarks; not yet wired |
-| **MiMo-V2.5-Pro** | Xiaomi | open weights | Strong reasoning |
-| **MiniMax M2.7** | MiniMax | open weights | Recent open-source |
-| **Gemma 4** | Google | open weights | Smaller — haiku-tier |
-| **Ring-2.6-1T** | Ant Group (inclusionAI) | open weights | Large MoE, 1T params |
-
-### DeepSeek V4 Pro on AWS (Level 6 + L4-tier compliance) — when this makes sense
-
-**DeepSeek V4 Pro is one viable open-weights opus-class model** — 1.6T params MoE, ~49B active per token, 80.6% on SWE-bench (lower than Kimi K2.6's 88.7%, but ahead of most). Weights ~864 GB. Doesn't fit on 8× H100 80GB (640 GB total < 864 GB); minimum viable host is **8× H200 141GB = 1,128 GB single node**, or 16× H100 across 2 nodes with NVLink+InfiniBand.
-
-AWS EC2 instances that fit it (verified May 2026):
-
-| Instance | Spec | US East (Ohio) $/hr | US West (N. California) $/hr | Availability |
-|---|---|---|---|---|
-| **p5e.48xlarge** | 8× H200, Sapphire Rapids CPU, 1,128 GiB HBM3e | **$39.80** (was $34.61 pre-Jan 2026) | **$49.75** | **Tight** — AWS hiked 15% in Jan due to GPU demand |
-| **p5en.48xlarge** | 8× H200 + Gen5 PCIe (faster CPU↔GPU) | ~$42 estimated Ohio | **$52.02** | Tighter than p5e |
-
-**Honest realities for this path:**
-- **~$40/hr in Ohio is the floor for DeepSeek V4 Pro on AWS** — and US East has the best supply.
-- **Capacity is generally not on-demand** — you typically use **EC2 Capacity Blocks for ML** (pre-book 1–6 month windows in cluster sizes 1–64 instances). On-demand p5e/p5en availability is genuinely scarce in May 2026.
-- **Compliance inheritance is the reason to pick AWS over Vast** — AWS Bedrock-tier BAA + SOC 1/2/3 + ISO 27001/27017/27018 + FedRAMP Moderate (commercial) / High (GovCloud) + HITRUST CSF all inherit transitively to the EC2 instance you run vLLM on. Vast/RunPod can't match that audit story.
-- **Cost vs Anthropic Opus API:** Anthropic Opus 4.7 ≈ $30/hr typical agentic load. AWS DeepSeek V4 Pro ≈ $40/hr. The self-hosting math **does not work for opus-tier on AWS** at current prices — Vast at $7.74/hr (4× H200) is 5× cheaper if your compliance bar is BAA-only rather than FedRAMP/HITRUST.
-- **Capacity Block reservations** lock you into 1–6 months at a fixed rate. If your usage is <40 hrs/month, on-demand Vast wins on flexibility even at higher hourly.
-
-**When AWS Level 6 actually makes sense:**
-1. You need **FedRAMP / HITRUST inheritance** on the inference path itself (Vast/RunPod can't give you this).
-2. You have **predictable continuous workload** (>4 hrs/day, 5 days/week) to amortize a Capacity Block reservation.
-3. Your data-governance team requires AWS-tier vendor risk management — not just BAA paper.
-
-For most users, **`opus-vast` on Vast.ai 4× H200 at $7.74/hr remains the right call.** AWS H200 is the answer only when the compliance ceiling demands it.
-
-DeepSeek V4 Pro vs Claude Opus 4.7: Opus is still better at long-context coherence and tool-use consistency. V4 Pro is closer on raw reasoning benchmarks. For agentic coding specifically, Opus still edges it — but the gap is small enough that self-hosting V4 Pro is a real choice if compliance forces it.
-
-## Setup detail
-
-### Pick your provider(s)
-
-You only need to set up the providers you'll actually use.
-
-**Vast.ai** — cheapest Level 6 path
-1. Sign up at https://cloud.vast.ai/
-2. Account → Create API Key → Advanced tab
-3. Permissions: **Instances** = Read+Write, everything else minimal, **2FA off** (programmatic key)
-4. Copy → `.env` as `VAST_API_KEY=...`
-
-**RunPod** — only provider with serverless wired today
-1. https://console.runpod.io/user/settings → API Keys → Create
-2. Permissions: **All** scope (Restricted returns 403 on serverless `/openai/v1`)
-3. Add credit, copy → `.env` as `RUNPOD_API_KEY=...`
-
-**Groq Cloud** — Level 3
-1. Sign up at https://console.groq.com/
-2. **Enable ZDR before first request**: https://console.groq.com/settings/data-controls
-3. Create API key → `.env` as `GROQ_API_KEY=...`
-4. (HIPAA) email security@groq.com requesting a counter-signed BAA — see [COMPLIANCE.md](COMPLIANCE.md)
-
-### Deploy and tear down
-
-```bash
-# Level 3 — API mode
-./scripts/api-up.sh                              # bring up LiteLLM with -api routes
-./scripts/destroy.sh api                         # stop LiteLLM, keep keys
-
-# Level 6 — Vast pods (recommended)
-./scripts/deploy-vast.sh haiku                   # 1× RTX 4090, ~$0.40–0.67/hr
-./scripts/deploy-vast.sh sonnet                  # 4× H100 80GB, ~$5.87/hr
-./scripts/deploy-vast.sh opus                    # 8× H100 80GB, ~$11.74/hr
-
-# Level 6 — RunPod alternatives
-./scripts/deploy.sh haiku                        # always-on pod
-./scripts/deploy-serverless.sh haiku             # scale-to-zero
-./scripts/deploy-serverless.sh sonnet            # scale-to-zero (H200, capacity-dependent)
-
-# Teardown
-./scripts/destroy.sh haiku-vast                  # one tier
-./scripts/destroy.sh all                         # everything across all providers
-```
-
-Pod termination stops billing within ~1 min. Serverless idle is already $0 (`workersMin=0`); teardown removes the endpoint + template.
-
-### Running multiple tiers in parallel
-
-Parallel cold-start, ~15-20 min wall time vs serial:
-
-```bash
-./scripts/deploy-vast.sh haiku &  ./scripts/deploy.sh sonnet &  wait
-```
-
-Each deploy is independent — separate bearer token, separate model alias in LiteLLM. All share `http://localhost:4000`. Switch in Cline by changing the **Model ID**.
-
-### Using Cline from a remote SSH host (VSCodium Remote-SSH, Tailscale SSH, etc.)
-
-If your VSCodium runs on a Mac but you're connected via Remote-SSH to a Linux box, Cline runs in the remote extension host — so its `localhost:4000` means the remote machine, not your Mac. LiteLLM stays on the Mac (keeps your provider API keys local); we tunnel port 4000 back over the SSH session you're already opening:
-
-```bash
-./scripts/tunnel.sh init <ssh-host>     # adds RemoteForward 4000 to ~/.ssh/config
-./scripts/tunnel.sh deinit <ssh-host>   # removes it
-./scripts/tunnel.sh status              # shows configured hosts
-```
-
-After `init`, reconnect any open Remote-SSH window (close → reopen). Cline's Base URL stays `http://localhost:4000/v1` — it's now forwarded back to your Mac. No tailnet ACL changes, no extra listeners exposed on your Mac, encrypted by the same SSH transport you're already using.
-
-If your tailnet ACL *does* allow remote → Mac (uncommon for tagged-devices → user setups), there's also an opt-in `docker-compose.tailscale.yml` that adds a Tailscale-interface binding — see comments in that file.
-
-### Persistent model cache (opus economics)
-
-Avoid re-downloading the 554 GiB Kimi K2.6 weights every day:
-
-```bash
-./scripts/vol-up.sh opus            # one-time ~$6 + ~1-2 hr download
-./scripts/deploy-vast.sh opus       # subsequent: 3-5 min cold start
-./scripts/destroy.sh opus-vast      # stops compute, keeps volume
-./scripts/vol-down.sh opus          # delete volume (end of project)
-```
-
-Monthly cost: ~$986 for 80 hrs/mo of opus use (4 hrs/day × 20 days) — about **60% cheaper than Anthropic Opus API** at typical agentic-coding token mix.
-
-**Caveat**: Vast volumes are pinned to a specific host. If that machine disappears, the volume is unavailable until it comes back. RunPod network volumes (host-independent) aren't wired in this repo yet.
-
-## Things we learned the hard way
-
-Field-tested gotchas baked into the scripts as comments and filters:
-
-- **Vast `verified` ≠ datacenter.** `verified: {eq: true}` means "host passes basic reliability checks" (marketplace tier, Docker-only isolation). The actual ZDR/HIPAA filter is `datacenter: {eq: true}` (ISO 27001, Tier 3/4, BAA-eligible). `deploy-vast.sh` hardcodes the latter.
-- **Vast rents whole hosts.** Search must use `num_gpus: {eq: N}` not `gte: N` — otherwise picking an 8-GPU host for a 4-GPU TP config double-bills.
-- **CUDA forward-compat doesn't work on consumer Ada.** RTX 4090 hosts with driver < 580 (`cuda_max_good < 13.0`) fail with `cudaInit error 804`. Filter forces `≥ 13.0`.
-- **`runpod/worker-v1-vllm` has no `:stable` or `:latest` tag** — only versioned tags. `:stable` silently stalls forever. `deploy-serverless.sh` pins to a known-good version.
-- **RunPod `Restricted` API-key scope returns 403** on `/v2/<id>/openai/v1`. Use **All** scope for serverless inference.
-- **Plain HTTP on Vast.** Vast direct-port-forwarding is `http://<host>:<port>`, not HTTPS. The bearer token is the only thing keeping the endpoint private. Adequate for personal use given the bearer; run a Caddy/Cloudflared sidecar for full TLS.
-- **Some multi-GPU Vast hosts have broken CDI runtime.** A subset fail container creation with "unresolvable CDI devices." Tear down and pick a different operator — per-host bug, not provider-wide.
-- **Vast Serverless isn't wired here.** Their model is Python SDK + `@app.remote()` handlers, not a flag on top of pods. Tracked as a follow-up PR.
-- **RunPod serverless workers go "unhealthy" on FP8 cold start with sonnet.** Diagnosed but not yet root-caused — likely worker-v1-vllm + DeepSeek V4 incompat. Use the Vast pod path for sonnet today.
-
-## How `zdr-coder` compares to similar projects
-
-| Project | Closeness | Differs |
-|---|---|---|
-| [Leafcloud `tf-leafcloud-opencode`](https://docs.leaf.cloud/en/latest/private-llm/team-opencode-vllm/) | ~70% | OpenCode TUI (not Cline), CIDR allowlist, Leafcloud-only, no BAA |
-| OpenClaw + vLLM on Vast.ai / Salad | ~65% | OpenClaw runtime, no LiteLLM Anthropic shim |
-| [Netclode](https://github.com/angristan/netclode) | ~55% | Mobile/iOS client, Ollama not vLLM, k3s + microVM-per-session |
-| ZeroClaw + LiteLLM + vLLM in Docker | ~50% | DGX Spark focus, ZeroClaw not Cline |
-| BentoVLLM / OpenLLM | ~50% | Just the "model → OpenAI endpoint" piece |
-
-**Differentiator**: nobody else ships VSCodium + Cline + LiteLLM + rented-GPU vLLM + serverless mode + HIPAA-eligible host + verified Groq API ZDR posture as a single one-line-deploy template.
-
-## Caveats
-
-- **BAA is a separate process on every provider** — RunPod, Vast, Groq all gate it behind sales/email. None are self-serve clickwrap with a counter-signed PDF on file. Plan ~1-5 business days.
-- **Cold start is slow.** Pods: ~10-20 min for haiku/sonnet, ~20-30 min for opus. Serverless: 3-10 min on first request after scale-to-zero. Run profiles in parallel to overlap warmups.
-- **80GB datacenter supply is thin.** Sonnet (4× A100/H100 80GB) and opus (8× H100 80GB) Secure-Cloud inventory rotates hourly. Have `GPU_NAME="H200"` as a fallback.
-- **No persistent vLLM cache by default** (except via `vol-up.sh`). Weights re-download each fresh pod.
-- **Hugging Face anonymous works for most models.** Qwen2.5-Coder-32B-AWQ and DeepSeek V4 Flash are open-weight; Kimi K2.6 too. Gated models need `HF_TOKEN` in `.env`.
-- **Parallel mode billing.** All three tiers running = ~$18-30/hr. Stop tiers you aren't testing with `./scripts/destroy.sh <profile>`.
+</details>
 
 ## Files
 
 ```
 .
 ├── README.md                       # this file
-├── COMPLIANCE.md                   # full Level-by-Level compliance mapping
-├── LICENSE                         # MIT
+├── COMPLIANCE.md                   # verbatim citations per cell
+├── LICENSE
 ├── start.command / start.bat       # double-click launchers (Mac / Windows)
-├── stop.command / stop.bat         # double-click teardown
+├── stop.command / stop.bat
 ├── docker-compose.yml              # LiteLLM container
 ├── litellm/config.yaml             # model-ID routes
-├── gpu-node/
-│   ├── Dockerfile                  # vLLM image
-│   └── start.sh                    # container entrypoint
+├── gpu-node/                       # vLLM Dockerfile + entrypoint
+├── sky/                            # SkyPilot YAML configs per tier
+│   ├── haiku-pod.yaml              # min_replicas: 1
+│   ├── sonnet-pod.yaml
+│   ├── opus-pod.yaml
+│   ├── haiku-serve.yaml            # min_replicas: 0
+│   ├── sonnet-serve.yaml
+│   └── opus-serve.yaml
 ├── scripts/
-│   ├── install-prereqs.sh          # macOS/Linux installer
-│   ├── install-prereqs.ps1         # Windows installer
-│   ├── api-up.sh                   # Level 3 — Groq API mode
-│   ├── aider-up.sh                 # one-time install of Aider (terminal client)
-│   ├── aider.sh                    # launch Aider pointed at the local proxy
-│   ├── openhands-up.sh             # browser-based agent UI for non-developers
-│   ├── openhands-down.sh           # stop OpenHands
-│   ├── deploy.sh                   # Level 6 — RunPod always-on pod
-│   ├── deploy-vast.sh              # Level 6 — Vast.ai pod (recommended)
-│   ├── deploy-serverless.sh        # Level 6 — RunPod serverless
-│   ├── vol-up.sh / vol-down.sh     # Vast persistent volume management
-│   ├── destroy.sh                  # teardown (any profile, any provider)
-│   ├── preflight.sh                # validate prereqs + .env
-│   └── smoketest.sh                # end-to-end path test
-├── .env.example                    # API key template
+│   ├── install-prereqs.sh
+│   ├── api-up.sh                   # Level 3 — Groq API
+│   ├── sky-up.sh                   # Level 6 — bring up via SkyPilot per tier
+│   ├── sky-down.sh
+│   ├── openhands-up.sh             # browser agent UI
+│   ├── aider.sh
+│   └── smoketest.sh
+├── .env.example
 └── .gitignore
 ```
-
-## Troubleshooting
-
-**`smoketest.sh` returns FAIL** — read its output; it names the broken hop.
-
-**`403 Forbidden` from RunPod serverless** — your `RUNPOD_API_KEY` is Restricted scope. Recreate with **All** scope.
-
-**Serverless worker stuck "initializing" or "unhealthy"** — check the RunPod dashboard for that worker's logs. Common causes: template image tag doesn't exist, GPU pool capacity, or vLLM init failure for FP8 models on non-Hopper hardware.
-
-**vLLM "out of memory"** — shrink `MAX_LEN` or lower `GPU_UTIL`. Haiku at 8K already exhausts KV cache on 24GB after CUDA-graph capture; default is 4K.
-
-**Cold-start request hits Cloudflare 524** — the sync `/openai/v1` path has a 120s edge timeout. Worker is fine; subsequent requests succeed once warmed.
-
-**Vast vLLM crashes with `cudaInit error 804`** — driver too old for our container's CUDA libs. Filter forces `cuda_max_good ≥ 13.0`.
-
-**Vast "Pulling fs layer" stalls** — host can't reach GHCR (typical of CN-located hosts). Filter `inet_down ≥ 500` Mbps.
-
-**Vast picks an 8-GPU host when you want 4** — Vast rents whole hosts. Script uses `num_gpus: {eq: N}` to avoid this.
-
-## Reporting vulnerabilities
-
-Open a private security advisory on this repository's GitHub Security tab. No bounty program; aim to respond within 5 business days.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## References
+
+[^skypilot]: https://github.com/skypilot-org/skypilot
+[^aws-baa]: https://aws.amazon.com/compliance/hipaa-compliance/
+[^aws-hipaa]: https://aws.amazon.com/compliance/hipaa-eligible-services-reference/
+[^aws-soc]: https://aws.amazon.com/compliance/soc-faqs/
+[^aws-iso]: https://aws.amazon.com/compliance/iso-27001-faqs/
+[^aws-fedramp]: https://aws.amazon.com/compliance/services-in-scope/FedRAMP/
+[^aws-regions]: https://aws.amazon.com/about-aws/global-infrastructure/regions_az/
+[^aws-cb]: https://aws.amazon.com/ec2/capacityblocks/pricing/
+[^aws-hike]: https://www.datacenterdynamics.com/en/news/aws-quietly-increases-prices-for-h200-ec2-instances-by-15/
+[^az-baa]: https://learn.microsoft.com/en-us/compliance/regulatory/offering-hipaa-hitech
+[^az-soc]: https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-soc-2
+[^az-iso]: https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-iso-27001
+[^az-fedramp]: https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-fedramp
+[^az-regions]: https://learn.microsoft.com/en-us/azure/reliability/regions-list
+[^az-h100]: https://instances.vantage.sh/azure/vm/nd96isrh100-v5
+[^az-h200]: https://instances.vantage.sh/azure/vm/nd96isrh200-v5
+[^gcp-baa]: https://cloud.google.com/security/compliance/hipaa
+[^gcp-soc]: https://cloud.google.com/security/compliance/soc-2
+[^gcp-iso]: https://cloud.google.com/security/compliance/iso-27001
+[^gcp-fedramp]: https://cloud.google.com/security/compliance/fedramp
+[^gcp-regions]: https://cloud.google.com/about/locations
+[^gcp-a3]: https://instances.vantage.sh/gcp/a3-highgpu-8g
+[^gcp-ultra]: https://instances.vantage.sh/gcp/a3-ultragpu-8g
+[^oci-baa]: https://www.oracle.com/cloud/public-cloud-regions/hipaa/
+[^oci-soc]: https://docs.oracle.com/en-us/iaas/Content/ComplianceDocuments/Concepts/compliancedocsoverview.htm
+[^oci-iso]: https://blogs.oracle.com/cloud-infrastructure/iso-27001-certificate-and-soc-1-2-and-3-attestations-for-oracle-cloud-infrastructure
+[^oci-fedramp]: https://www.fedramp.gov/marketplace/products/FR1900048743/
+[^oci-regions]: https://www.oracle.com/cloud/public-cloud-regions/
+[^oci-pricing]: https://www.oracle.com/cloud/compute/gpu/
+[^cw-trust]: https://www.coreweave.com/security
+[^cw-cks]: https://docs.coreweave.com/docs/products/cks
+[^cw-eu]: https://www.coreweave.com/blog/coreweaves-european-expansion-lets-power-tomorrows-ai-innovations
+[^cw-pricing]: https://www.coreweave.com/pricing
+[^cru-trust]: https://trust.crusoe.ai/
+[^cru-soc]: https://www.crusoe.ai/resources/blog/crusoe-cloud-achieves-soc-2-type-ii
+[^cru-eu]: https://crusoe.ai/newsroom/crusoe-announces-strategic-european-expansion-with-first-data-center-in/
+[^cru-pricing]: https://www.crusoe.ai/cloud/pricing
+[^nebius-trust]: https://nebius.com/trust-center
+[^nebius-eu]: https://nebius.com/newsroom/nebius-to-construct-310-mw-ai-factory-in-finland
+[^nebius-prices]: https://nebius.com/prices
+[^sky-nebius]: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/nebius.html
+[^verda-faq]: https://verda.com/faq
+[^verda-products]: https://verda.com/products
+[^verda-contact]: https://verda.com/contact
+[^sky-verda]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^lambda-trust]: https://lambda.ai/trust
+[^lambda-gov]: https://lambda.ai/government
+[^lambda-pricing]: https://lambda.ai/pricing
+[^sky-lambda]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^runpod-comp]: https://www.runpod.io/legal/compliance
+[^runpod-press]: https://www.runpod.io/press/runpod-meets-hipaa-and-gdpr-standards
+[^runpod-pricing]: https://www.runpod.io/pricing
+[^sky-runpod]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^vast-comp]: https://vast.ai/compliance
+[^vast-pricing]: https://vast.ai/pricing
+[^sky-vast]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^fs-home]: https://fluidstack.io
+[^fs-pricing]: https://fluidstack.io/resources/pricing
+[^sky-fs]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^hs-sec]: https://www.nexgencloud.com/security
+[^hs-prc]: https://www.hyperstack.cloud/gpu-pricing
+[^sky-clouds]: https://github.com/skypilot-org/skypilot/tree/master/sky/clouds
+[^cudo-home]: https://www.cudocompute.com/
+[^cudo-dc]: https://www.cudocompute.com/data-centers
+[^cudo-pricing]: https://www.cudocompute.com/pricing
+[^sky-cudo]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^do-hipaa]: https://www.digitalocean.com/trust/hipaa-at-do
+[^do-trust]: https://www.digitalocean.com/trust/certification-reports
+[^do-regions]: https://docs.digitalocean.com/platform/regional-availability/
+[^do-pricing]: https://www.digitalocean.com/pricing/gpu-droplets
+[^sky-pap]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^sky-aws]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^sky-az]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^sky-gcp]: https://docs.skypilot.co/en/latest/getting-started/installation.html
+[^sky-oci]: https://docs.skypilot.co/en/latest/getting-started/installation.html

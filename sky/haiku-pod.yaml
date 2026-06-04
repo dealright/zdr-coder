@@ -1,0 +1,46 @@
+# zdr-coder — Haiku-tier always-on inference pod
+# Qwen2.5-Coder-32B-AWQ (~18 GB INT4) on 1× L40S
+# Cost: $1.37–$1.90/hr depending on tier-selected backend
+#
+# Usage:
+#   sky launch -c haiku-pod sky/haiku-pod.yaml
+#   sky status   # check IP
+#   sky down haiku-pod   # tear down (stops billing)
+
+name: haiku-pod
+
+resources:
+  accelerators: {L40S:1, L40:1, A100:1, A10G:1}
+  # Tier-selected backend pool. SkyPilot picks the cheapest available.
+  # Override with `--cloud nebius` (or verda, aws, etc.) if needed.
+  # 5-backend failover pool — top-5 by fleet size, all sales-free + SkyPilot-native:
+  # RunPod + Vast (instant), Lambda + AWS + OCI (quota approval needed once).
+  # Excluded: Verda (no open_ports), Nebius (US-card-decline), CoreWeave (K8s-only).
+  any_of:
+    - cloud: runpod
+    - cloud: vast
+    - cloud: lambda
+    - cloud: aws
+    # OCI excluded — doesn't support docker_image in SkyPilot.
+
+  disk_size: 100   # GB — Qwen weights are small, plus base image
+  ports: 8080      # vLLM OpenAI-compatible endpoint
+  # Use vLLM's official Docker image — preinstalled with CUDA toolkit (nvcc),
+  # ninja, flashinfer, autoawq, and vLLM itself. Avoids the Vast base-image
+  # missing-deps trap (no nvcc → FlashInfer JIT compile fails).
+  image_id: docker:vllm/vllm-openai:v0.10.0
+
+setup: |
+  set -e
+  mkdir -p ~/cache
+
+run: |
+  # Override the image's entrypoint and run vLLM directly
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-Coder-32B-Instruct-AWQ \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --quantization awq \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.92 \
+    --served-model-name haiku-pod

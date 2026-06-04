@@ -1,0 +1,73 @@
+# One-time weight staging job: download Kimi K2.6 from HuggingFace,
+# write directly into Cloudflare R2 bucket via SkyPilot's MOUNT mode.
+#
+# Pod uses a cheap 1× L40S (or fallback) — we don't need GPU compute,
+# just the network + disk to download and forward. Total cost ~$3-6.
+#
+# After this finishes, opus-pod.yaml and opus-serve.yaml can mount the
+# same R2 bucket and skip the 25-min HuggingFace download on every launch.
+#
+# Usage:
+#   sky launch -c stage-opus sky/stage-opus-weights.yaml --yes --idle-minutes-to-autostop 30
+#   sky logs stage-opus           # watch download progress
+#   sky down stage-opus --yes     # tear down after weights are in R2
+
+name: stage-opus-weights
+
+resources:
+  # Cheapest GPU pod — we just need network + a place to run python.
+  # GPU is unused; we picked one because RunPod's CPU-only pods cap disk at 40GB
+  # which is too small for in-transit chunks, and GPU pods get bigger disks.
+  accelerators: {L40S:1, L40:1, A10G:1}
+  any_of:
+    - cloud: runpod
+    - cloud: vast
+    - cloud: lambda
+  disk_size: 100   # need ~400 GB for the local copy before upload to R2
+
+# COPY mode: download to local /weights first, then sync to R2 at job end.
+# (RunPod + Vast don't support FUSE MOUNT for buckets; AWS/GCP/Azure do.)
+file_mounts:
+  /weights:
+    source: r2://zdr-coder-weights
+    mode: COPY
+
+setup: |
+  set -e
+  pip install --quiet "huggingface_hub[hf_transfer]>=0.24" "hf_transfer>=0.1.6"
+  echo "Setup complete."
+
+run: |
+  set -e
+  echo "=========================================="
+  echo "Downloading Kimi K2.6 weights into R2"
+  echo "Started at: $(date -u)"
+  echo "Source: moonshotai/Kimi-K2-Instruct"
+  echo "Target: /weights/kimi-k2.6/ (R2 bucket zdr-coder-weights)"
+  echo "Expected size: ~380 GB on disk, ~2-4 hours via FUSE mount"
+  echo "=========================================="
+
+  # hf_transfer is the fast multipart downloader (~5× faster than default)
+  export HF_HUB_ENABLE_HF_TRANSFER=1
+
+  python -c "
+  from huggingface_hub import snapshot_download
+  print('Starting snapshot_download...')
+  path = snapshot_download(
+      repo_id='moonshotai/Kimi-K2-Instruct',
+      local_dir='/weights/kimi-k2.6',
+      max_workers=8,
+      tqdm_class=None,  # quieter logs in unattended mode
+  )
+  print(f'Done. Files in R2 at: zdr-coder-weights/kimi-k2.6/')
+  print(f'Local mount path: {path}')
+  "
+
+  echo "=========================================="
+  echo "Staging complete at: $(date -u)"
+  echo "Run: aws --endpoint-url https://<account-id>.r2.cloudflarestorage.com s3 ls s3://zdr-coder-weights/kimi-k2.6/"
+  echo "to verify, then sky down stage-opus to stop billing."
+  echo "=========================================="
+
+  # Sleep so autostop can fire — keeps job in SUCCEEDED state until idle timer hits
+  sleep 60

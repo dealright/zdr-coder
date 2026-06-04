@@ -1,0 +1,45 @@
+# zdr-coder — Haiku-tier scale-to-zero serverless
+# Same model as haiku-pod but with min_replicas: 0
+# Cost: $0 idle, ~$1.50/hr active. Cold start ~60–90s.
+#
+# Usage:
+#   sky serve up -n haiku-serve sky/haiku-serve.yaml
+#   sky serve status   # get endpoint URL
+#   sky serve down haiku-serve
+
+service:
+  readiness_probe:
+    path: /v1/models
+    initial_delay_seconds: 180
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 3
+    target_qps_per_replica: 2
+    upscale_delay_seconds: 30
+    downscale_delay_seconds: 600   # 10 min idle before tear-down
+
+resources:
+  accelerators: {L40S:1, L40:1, A100:1, A10G:1}
+  # 4-backend failover pool (top sales-free fleets). OCI excluded (no docker_image support).
+  any_of:
+    - cloud: runpod
+    - cloud: vast
+    - cloud: lambda
+    - cloud: aws
+  disk_size: 100
+  ports: 8080
+  image_id: docker:vllm/vllm-openai:v0.10.0
+
+setup: |
+  set -e
+  mkdir -p ~/cache
+
+run: |
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-Coder-32B-Instruct-AWQ \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --quantization awq \
+    --max-model-len 32768 \
+    --gpu-memory-utilization 0.92 \
+    --served-model-name haiku-serve
