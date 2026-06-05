@@ -1,6 +1,16 @@
 # zdr-coder — Haiku-tier always-on inference pod
-# Qwen2.5-Coder-32B-AWQ (~18 GB INT4) on 1× L40S
+# Qwen3-Coder-30B-A3B-Instruct-FP8 (~30 GB on disk) on 1× L40S / L40 / A100
 # Cost: $1.37–$1.90/hr depending on tier-selected backend
+#
+# Why this model: Apache 2.0 coder-tuned MoE; 30B total / 3.3B active per token
+# means roughly 10× the throughput of the prior Qwen2.5-Coder-32B dense pick at
+# the same GPU footprint. 256K native context (vs 8K we'd been pinned to).
+# BFCL v3 ~70.8% — good enough for agentic tool calls when paired with the
+# qwen3_xml parser below.
+#
+# Why qwen3_xml parser (not qwen3_coder): vLLM's `qwen3_coder` parser has
+# documented infinite-output bugs on long-context tool calls; `qwen3_xml` is
+# the maintained successor for Qwen3-Coder family XML-tagged tool calls.
 #
 # Usage:
 #   sky launch -c haiku-pod sky/haiku-pod.yaml
@@ -10,9 +20,9 @@
 name: haiku-pod
 
 resources:
-  accelerators: {L40S:1, L40:1, A100:1, A10G:1}
-  # Tier-selected backend pool. SkyPilot picks the cheapest available.
-  # Override with `--cloud nebius` (or verda, aws, etc.) if needed.
+  # A10G removed — Qwen3-Coder-30B-A3B-FP8 needs ~30 GB and 24 GB doesn't fit.
+  # L40S (48 GB) is the new floor. A100 80GB handles full 256K context.
+  accelerators: {L40S:1, L40:1, A100:1}
   # 5-backend failover pool — top-5 by fleet size, all sales-free + SkyPilot-native:
   # RunPod + Vast (instant), Lambda + AWS + OCI (quota approval needed once).
   # Excluded: Verda (no open_ports), Nebius (US-card-decline), CoreWeave (K8s-only).
@@ -23,7 +33,7 @@ resources:
     - cloud: aws
     # OCI excluded — doesn't support docker_image in SkyPilot.
 
-  disk_size: 100   # GB — Qwen weights are small, plus base image
+  disk_size: 100   # GB — Qwen3-Coder-30B FP8 is ~30 GB, plus base image
   ports: 8080      # vLLM OpenAI-compatible endpoint
   # Use vLLM's official Docker image — preinstalled with CUDA toolkit (nvcc),
   # ninja, flashinfer, autoawq, and vLLM itself. Avoids the Vast base-image
@@ -35,12 +45,16 @@ setup: |
   mkdir -p ~/cache
 
 run: |
-  # Override the image's entrypoint and run vLLM directly
+  # Override the image's entrypoint and run vLLM directly.
+  # --enable-auto-tool-choice + --tool-call-parser qwen3_xml: convert the
+  # model's <tool_call>{...}</tool_call> XML output into OpenAI tool_calls[].
+  # Without this, agentic clients (Hermes, Cline) get raw text and fail.
   python3 -m vllm.entrypoints.openai.api_server \
-    --model Qwen/Qwen2.5-Coder-32B-Instruct-AWQ \
+    --model Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8 \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
-    --quantization awq \
-    --max-model-len 8192 \
+    --max-model-len 32768 \
     --gpu-memory-utilization 0.92 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_xml \
     --served-model-name haiku-pod

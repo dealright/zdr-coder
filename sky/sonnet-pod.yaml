@@ -1,6 +1,11 @@
 # zdr-coder — Sonnet-tier always-on inference pod
-# DeepSeek V4 Flash (158B FP8, 149 GB weights) on 4× H100 80GB
-# Cost: $13–$16/hr depending on tier-selected backend
+# GLM-4.5-Air (106B total / 12B active MoE, ~212 GB BF16 / ~110 GB FP8)
+# Cost: $10–$14/hr on 4× H100 (BF16); ~$4/hr on 1× H200 (FP8)
+#
+# Why this model: MIT license, 128K context, BFCL-v3 in the "good" range,
+# hybrid thinking/non-thinking modes built for agentic+coding workloads.
+# Fits the 4-GPU bucket EXACTLY — DeepSeek-V4-Flash (the prior pick) wanted
+# 2× H200 or 8× H100 and was overprovisioning at 4× H100.
 #
 # Usage:
 #   sky launch -c sonnet-pod sky/sonnet-pod.yaml
@@ -10,11 +15,10 @@
 name: sonnet-pod
 
 resources:
-  # 8× added as fallback per user OK — when 4× is dry, use 8× and overprovision.
-  # A100-80GB:8 added because AWS H100/H200 inventory is empty in mid-2026;
-  # p4de.24xlarge (8× A100 80GB, $27.45/hr us-east-1) has actual capacity.
-  # tensor-parallel-size is auto-detected from $SKYPILOT_NUM_GPUS_PER_NODE in run block.
-  accelerators: {H100:4, A100-80GB:4, H200:4, H100:8, A100-80GB:8, H200:8}
+  # 4-GPU bucket is the sweet spot. 8× added as overprovisioning fallback when
+  # 4× SKUs are dry. tensor-parallel-size is auto-detected from
+  # $SKYPILOT_NUM_GPUS_PER_NODE in the run block.
+  accelerators: {H100:4, A100-80GB:4, H200:4, H200:1, H100:8, A100-80GB:8, H200:8}
   # 4-backend failover pool. Vast has cheapest 4× H100 ($7.47) and 8× H100 ($14.94).
   # AWS p5 is 8× only (no 4× SKU) — picks up via 8× fallback. OCI excluded (no docker_image support).
   any_of:
@@ -23,10 +27,12 @@ resources:
     - cloud: lambda
     - cloud: aws
 
-  # Pinned vLLM image avoids: Vast lacks nvcc/ninja, Lambda driver too old for :latest
+  # Pinned vLLM image avoids: Vast lacks nvcc/ninja, Lambda driver too old for :latest.
+  # NOTE: glm45 tool-call parser landed in vLLM ~Q4 2025. If v0.10.0 lacks it,
+  # bump to v0.10.2+ (verify your CUDA driver supports it first on Lambda).
   image_id: docker:vllm/vllm-openai:v0.10.0
 
-  disk_size: 300   # GB — DeepSeek V4 Flash weights are ~149 GB
+  disk_size: 300   # GB — GLM-4.5-Air BF16 ~212 GB, FP8 ~110 GB
   ports: 8080
 
 setup: |
@@ -35,11 +41,16 @@ setup: |
 
 run: |
   # tensor-parallel-size auto-detected (works for 4× or 8× SKUs SkyPilot lands on)
+  # --tool-call-parser glm45: converts GLM-4.5's native tool-call output into
+  # OpenAI tool_calls[]. Required for agentic clients (Hermes, Cline).
   python3 -m vllm.entrypoints.openai.api_server \
-    --model deepseek-ai/DeepSeek-V4-Flash \
+    --model zai-org/GLM-4.5-Air \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-    --max-model-len 65536 \
+    --max-model-len 131072 \
     --gpu-memory-utilization 0.92 \
+    --enable-auto-tool-choice \
+    --tool-call-parser glm45 \
+    --trust-remote-code \
     --served-model-name sonnet-pod

@@ -1,14 +1,15 @@
-# One-time weight staging job: download Kimi K2.6 from HuggingFace,
+# One-time weight staging job: download DeepSeek-V4-Pro from HuggingFace,
 # write directly into Cloudflare R2 bucket via SkyPilot's MOUNT mode.
 #
 # Pod uses a cheap 1× L40S (or fallback) — we don't need GPU compute,
-# just the network + disk to download and forward. Total cost ~$3-6.
+# just the network + disk to download and forward. Total cost ~$6-10 since
+# V4-Pro weights are ~800 GB (FP4+FP8) vs the prior Kimi K2 ~554 GB pick.
 #
 # After this finishes, opus-pod.yaml and opus-serve.yaml can mount the
-# same R2 bucket and skip the 25-min HuggingFace download on every launch.
+# same R2 bucket and skip the 25+ min HuggingFace download on every launch.
 #
 # Usage:
-#   sky launch -c stage-opus sky/stage-opus-weights.yaml --yes --idle-minutes-to-autostop 30
+#   sky launch -c stage-opus sky/stage-opus-weights.yaml --yes --idle-minutes-to-autostop 60
 #   sky logs stage-opus           # watch download progress
 #   sky down stage-opus --yes     # tear down after weights are in R2
 
@@ -23,7 +24,7 @@ resources:
     - cloud: runpod
     - cloud: vast
     - cloud: lambda
-  disk_size: 100   # need ~400 GB for the local copy before upload to R2
+  disk_size: 1000   # need ~800 GB for the local copy before upload to R2
 
 # COPY mode: download to local /weights first, then sync to R2 at job end.
 # (RunPod + Vast don't support FUSE MOUNT for buckets; AWS/GCP/Azure do.)
@@ -40,11 +41,11 @@ setup: |
 run: |
   set -e
   echo "=========================================="
-  echo "Downloading Kimi K2.6 weights into R2"
+  echo "Downloading DeepSeek-V4-Pro weights into R2"
   echo "Started at: $(date -u)"
-  echo "Source: moonshotai/Kimi-K2-Instruct"
-  echo "Target: /weights/kimi-k2.6/ (R2 bucket zdr-coder-weights)"
-  echo "Expected size: ~380 GB on disk, ~2-4 hours via FUSE mount"
+  echo "Source: deepseek-ai/DeepSeek-V4-Pro"
+  echo "Target: /weights/deepseek-v4-pro/ (R2 bucket zdr-coder-weights)"
+  echo "Expected size: ~800 GB on disk, ~3-5 hours via FUSE mount"
   echo "=========================================="
 
   # hf_transfer is the fast multipart downloader (~5× faster than default)
@@ -54,18 +55,18 @@ run: |
   from huggingface_hub import snapshot_download
   print('Starting snapshot_download...')
   path = snapshot_download(
-      repo_id='moonshotai/Kimi-K2-Instruct',
-      local_dir='/weights/kimi-k2.6',
+      repo_id='deepseek-ai/DeepSeek-V4-Pro',
+      local_dir='/weights/deepseek-v4-pro',
       max_workers=8,
       tqdm_class=None,  # quieter logs in unattended mode
   )
-  print(f'Done. Files in R2 at: zdr-coder-weights/kimi-k2.6/')
+  print(f'Done. Files in R2 at: zdr-coder-weights/deepseek-v4-pro/')
   print(f'Local mount path: {path}')
   "
 
   echo "=========================================="
   echo "Staging complete at: $(date -u)"
-  echo "Run: aws --endpoint-url https://<account-id>.r2.cloudflarestorage.com s3 ls s3://zdr-coder-weights/kimi-k2.6/"
+  echo "Run: aws --endpoint-url https://<account-id>.r2.cloudflarestorage.com s3 ls s3://zdr-coder-weights/deepseek-v4-pro/"
   echo "to verify, then sky down stage-opus to stop billing."
   echo "=========================================="
 

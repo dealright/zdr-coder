@@ -4,7 +4,7 @@
 [![ZDR](https://img.shields.io/badge/data%20retention-zero-green.svg)](COMPLIANCE.md)
 [![HIPAA](https://img.shields.io/badge/HIPAA-eligible%20via%20provider%20BAA-purple.svg)](COMPLIANCE.md)
 
-**Self-host your AI coding assistant with verifiable ZDR.** Open-weights models (Kimi K2.6, DeepSeek V4, GPT-OSS) on rented GPU, behind one local OpenAI-compatible proxy. One config picks your compliance/cost tier; SkyPilot[^skypilot] aggregates supply across providers and fails over automatically.
+**Self-host your AI coding assistant with verifiable ZDR.** Open-weights models (DeepSeek V4 Pro, GLM-4.5-Air, Qwen3-Coder, GPT-OSS) on rented GPU, behind one local OpenAI-compatible proxy. One config picks your compliance/cost tier; SkyPilot[^skypilot] aggregates supply across providers and fails over automatically.
 
 > **Never used a terminal?** Jump to [📚 If you've never used a terminal](#-if-youve-never-used-a-terminal-read-this-first).
 
@@ -45,7 +45,7 @@ These came up during this repo's actual deployment testing and are worth knowing
 | GPU | Reality | Implication |
 |---|---|---|
 | **8× H200 (opus tier)** | Genuinely scarce across **all** clouds. Vast bid 400s, RunPod 8× H200 has an allocator bug, AWS p5e InsufficientCapacity, GCP A3 Ultra is reservation-only | Opus tier may simply not launch on a given day; AWS Capacity Blocks (1-14 day pre-paid windows) is the most reliable path |
-| **4-8× H100 (sonnet tier)** | AWS quota approved ≠ AWS has capacity. Even with 192 vCPU quota, p5.48xlarge returns `InsufficientInstanceCapacity` in us-east-1/2/west-1/2 | Fall back to **p4de.24xlarge (8× A100 80GB, $27/hr us-east-1)** — DeepSeek V4 Flash fits easily; `sonnet-pod.yaml`'s `accelerators:` list already includes `A100-80GB:8` |
+| **4-8× H100 (sonnet tier)** | AWS quota approved ≠ AWS has capacity. Even with 192 vCPU quota, p5.48xlarge returns `InsufficientInstanceCapacity` in us-east-1/2/west-1/2 | Fall back to **p4de.24xlarge (8× A100 80GB, $27/hr us-east-1)** — GLM-4.5-Air fits comfortably; `sonnet-pod.yaml`'s `accelerators:` list already includes `A100-80GB:8` |
 | **1× L40S (haiku tier)** | AWS G-family quota (g5/g6e) default = 0 vCPUs and **per-region**. Smallest g6e.xlarge needs 4 vCPUs. | Use **Lambda 1× A100 SXM4** ($1.99/hr, plentiful supply) instead — `haiku-pod.yaml` already targets this |
 | **vLLM Docker image** | `vllm/vllm-openai:latest` requires CUDA driver 12.9+ which Lambda's hosts don't have | Pin to `vllm/vllm-openai:v0.10.0` (already in the YAMLs); v0.10.0 supports driver 12.4+ |
 | **AWS GPU quotas** | Per-region. The "Running On-Demand P instances" 192 vCPU quota approved in us-east-2 doesn't grant capacity in eu-west-2 / us-west-2 / etc. | Submit the same request in every region you intend to use. Single approval ≠ global. |
@@ -68,7 +68,7 @@ The non-dev path is Groq unless your compliance team specifically requires a ven
 
 ### Path 2: Self-hosted on rented GPU (this is where the tier picker matters)
 
-Pick this if you want **opus-class** (Kimi K2.6, DeepSeek V4 Pro) under ZDR, or want to run *your* container instead of someone else's API. One env var picks the SkyPilot backend pool; SkyPilot handles failover.
+Pick this if you want **opus-class** (DeepSeek V4 Pro, Kimi K2.6) under ZDR, or want to run *your* container instead of someone else's API. One env var picks the SkyPilot backend pool; SkyPilot handles failover.
 
 **This repo is sales-free by design.** No phone calls, no scheduled demos, no enterprise contracts. Every backend in the table below can be set up entirely through web signup + CLI keys. Tiers requiring sales calls for BAA (CoreWeave, OCI, Vast Secure tier) are documented in the master table but **not** wired into a default `ZDR_TIER` — if you genuinely need their BAA, you'd configure them as a one-off override.
 
@@ -190,11 +190,11 @@ VERDA_CLIENT_ID=...           # get at https://console.verda.com → Credentials
 VERDA_CLIENT_SECRET=...
 ```
 
-`sky check` will confirm both are healthy. `sky launch --gpus H200:8 --cloud vast` runs Kimi K2.6 on Vast France for ~$20.71/hr. `sky serve up` with `min_replicas: 0` does the same with scale-to-zero.
+`sky check` will confirm both are healthy. `sky launch --gpus H200:8 --cloud vast` runs DeepSeek V4 Pro on Vast France for ~$22/hr. `sky serve up` with `min_replicas: 0` does the same with scale-to-zero.
 
 If you need a **counter-signed BAA**, flip to `ZDR_TIER=hipaa` and configure AWS instead (`aws configure`, BAA self-serve in [AWS Artifact](https://aws.amazon.com/compliance/hipaa-compliance/)). If you need **FedRAMP**, add Azure + OCI alongside.
 
-### Kimi K2.6 hardware reality check
+### Opus-tier hardware reality check (1T+ MoE models)
 
 Naive math says 554 GB weights should fit on 8× H100 80GB (640 GB) or 4× H200 141GB (564 GB). **In production neither actually works.** Per a [real production deployment writeup](https://medium.com/@shivank1128/deploying-kimi-k2-5-on-h200-gpus-the-real-story-nobody-tells-you-7a18a6ca905a):
 
@@ -215,12 +215,12 @@ LiteLLM proxies your client requests to the right backend. Switch by changing th
 |---|---|---|---|---|
 | `haiku-api` | GPT-OSS 20B (Groq) | always-warm | Groq Cloud (Level 3) | $0.10 active, $0 idle |
 | `sonnet-api` | GPT-OSS 120B (Groq) | always-warm | Groq Cloud (Level 3) | $0.20 active, $0 idle |
-| `haiku-pod` | Qwen2.5-Coder-32B-AWQ | `min_replicas: 1` | SkyPilot, tier-selected | $0.40–1.50 |
-| `sonnet-pod` | DeepSeek V4 Flash (149 GB FP8) | `min_replicas: 1` | SkyPilot, tier-selected | $4.27–16 |
-| `opus-pod` | **Kimi K2.6** (1T, needs 8× H200) | `min_replicas: 1` | SkyPilot, tier-selected | $20.71–80 |
-| `haiku-serve` | Qwen2.5-Coder-32B-AWQ | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$0.50 active |
-| `sonnet-serve` | DeepSeek V4 Flash | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$6 active (cold start ~2–3 min) |
-| `opus-serve` | Kimi K2.6 (8× H200 only) | `min_replicas: 0` ⚠️ | SkyPilot serve, scale-to-zero | $0 idle, ~$21–80 active (cold start ~3–5 min — see [warmup tricks][#opus-cold-start]) |
+| `haiku-pod` | Qwen3-Coder-30B-A3B-Instruct-FP8 (~30 GB) | `min_replicas: 1` | SkyPilot, tier-selected | $1.37–1.90 |
+| `sonnet-pod` | **GLM-4.5-Air** (106B/12B MoE, MIT) | `min_replicas: 1` | SkyPilot, tier-selected | $10–14 (4× H100) or ~$4 (1× H200 FP8) |
+| `opus-pod` | **DeepSeek V4 Pro** (1.6T/49B MoE, MIT, needs 8× H200) | `min_replicas: 1` | SkyPilot, tier-selected | $22–32 |
+| `haiku-serve` | Qwen3-Coder-30B-A3B-Instruct-FP8 | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$1.50 active (cold start ~60–90s) |
+| `sonnet-serve` | GLM-4.5-Air | `min_replicas: 0` | SkyPilot serve, scale-to-zero | $0 idle, ~$10 active (cold start ~90s FP8) |
+| `opus-serve` | DeepSeek V4 Pro (8× H200 only) | `min_replicas: 0` ⚠️ | SkyPilot serve, scale-to-zero | $0 idle, ~$28 active (cold start ~4–6 min — see [warmup tricks][#opus-cold-start]) |
 
 Switching is instant — change the field in Aider (`ZDR_MODEL=...`) or Cline (Model ID).
 
@@ -230,8 +230,8 @@ Switching is instant — change the field in Aider (`ZDR_MODEL=...`) or Cline (M
 |---|---|---|---|
 | Haiku-class, cheapest | `haiku-api` (GPT-OSS 20B on Groq) | $0.10 active, $0 idle | Comparable for simple edits; coding-tuned |
 | Sonnet-ish, scale-to-zero managed | `sonnet-api` (GPT-OSS 120B on Groq) | $0.20 active, $0 idle | Between Sonnet 3.5 and Sonnet 4 |
-| Sonnet-class, self-hosted | `sonnet-pod` (DeepSeek V4 Flash) | $4.27–16/hr | Solid Sonnet-class; 65K context |
-| Opus-class | `opus-pod` (Kimi K2.6 on 8× H200) | $20.71–80/hr | 80.2–88.7% SWE-Bench vs Opus 4.7's 87.6% — **comparable** |
+| Sonnet-class, self-hosted | `sonnet-pod` (GLM-4.5-Air, MIT, 12B-active MoE) | $4–14/hr | Solid Sonnet-class; 128K context; **good** tool calling for agentic loops |
+| Opus-class | `opus-pod` (DeepSeek V4 Pro on 8× H200) | $22–32/hr | Frontier open model (Apr 2026); 1M context; **good** tool calling (vs Kimi K2.6's mediocre) |
 
 There's no Groq-API equivalent for Opus-tier — Groq's catalog tops out at GPT-OSS 120B. Opus-class under ZDR means self-hosting.
 
@@ -297,7 +297,7 @@ Verbatim citations for each cell in [COMPLIANCE.md](COMPLIANCE.md).
 ## Honest performance caveats — read before betting on these aliases
 
 - **Long-horizon tool-use consistency**: Claude Opus 4.7 still leads on 20+ tool-call agentic loops. Open-weights drift more in long sessions. Mitigation: shorter scope per session, explicit `/clear` between unrelated tasks.
-- **Aider edit-block format compliance**: older Qwen models drop the diff format ~5–10% of the time. GPT-OSS 120B and Kimi K2.6 are reliable. If a model misbehaves, try `--edit-format whole` or `udiff`.
+- **Aider edit-block format compliance**: GPT-OSS 120B, GLM-4.5-Air, and DeepSeek V4 Pro are reliable on the default `diff` format. Older Qwen2.5/Llama 3.x models dropped it ~5–10% of the time; Qwen3-Coder is meaningfully better. If a model misbehaves, try `--edit-format whole` or `udiff`.
 - **GPQA / scientific reasoning**: Opus 4.7 leads (~94%). No open-weights model matches it yet.
 - **MCP-Atlas / structured tool orchestration**: Opus 4.7 leads.
 - **Cost vs quality crossover**: <2 hrs/day → Level 3 API is cheaper than self-hosted. >4 hrs/day → self-hosted wins.
@@ -305,7 +305,7 @@ Verbatim citations for each cell in [COMPLIANCE.md](COMPLIANCE.md).
 
 ## opus cold start
 
-Kimi K2.6 weights (~549 GB loaded, ~380 GB on disk) make scale-to-zero painful (3–5 min first request on 8× H200). Two mitigations baked in:
+DeepSeek V4 Pro weights (~800 GB FP4+FP8 on disk, ~1 TB loaded) make scale-to-zero painful (4–6 min first request on 8× H200). Two mitigations baked in:
 
 1. **Bucket mount**: pre-stage weights once in cloud storage, mount on boot. ~2 min cold start.
 2. **Custom VM image** with weights baked in: ~60–90s cold start.
@@ -370,7 +370,7 @@ Skip the `pip install skypilot` step — the Groq path uses Level 3 API mode, no
 - **`sky check` fails on a backend** — confirm the auth command from the integration table ran cleanly; some backends (Nebius, Verda) require both an API token AND a tenant/project ID in env or config file.
 - **`sky launch` says "no resources satisfy"** — your tier's backends are out of capacity for that GPU shape. Add more backends in your `.env` (re-run `./scripts/setup.sh`) — Vast almost always has H100/H200 supply when RunPod is dry.
 - **Serverless 524 timeout on first request** — cold start exceeded edge timeout. The replica is still warming; retry in 60s.
-- **vLLM OOM on opus** — you tried to run Kimi K2.6 on 4× H200 (564 GB) or 8× H100 (640 GB). **Doesn't work**, despite naive weight math suggesting it should — the BF16 attention layers (~130 GB un-quantized) + KV cache + CUDA overhead push real requirement to 1+ TB. Use 8× H200 (1,128 GB) only. See "Kimi K2.6 hardware reality check" above.
+- **vLLM OOM on opus** — you tried to run DeepSeek V4 Pro (or Kimi K2.6) on 4× H200 (564 GB) or 8× H100 (640 GB). **Doesn't work** for either model, despite naive weight math suggesting it might — attention layers + KV cache + CUDA overhead push real requirement past 1 TB. Use 8× H200 (1,128 GB) only. See "Opus-tier hardware reality check" above.
 
 </details>
 

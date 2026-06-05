@@ -19,7 +19,7 @@ service:
     downscale_delay_seconds: 600   # 10 min idle before tear-down
 
 resources:
-  accelerators: {L40S:1, L40:1, A100:1, A10G:1}
+  accelerators: {L40S:1, L40:1, A100:1}
   # 4-backend failover pool (top sales-free fleets). OCI excluded (no docker_image support).
   any_of:
     - cloud: runpod
@@ -36,10 +36,11 @@ setup: |
 
 run: |
   python3 -m vllm.entrypoints.openai.api_server \
-    --model Qwen/Qwen2.5-Coder-32B-Instruct-AWQ \
+    --model Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8 \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
-    --quantization awq \
     --max-model-len 32768 \
     --gpu-memory-utilization 0.92 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_xml \
     --served-model-name haiku-serve

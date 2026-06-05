@@ -1,6 +1,6 @@
 # zdr-coder — Sonnet-tier scale-to-zero serverless
-# DeepSeek V4 Flash with min_replicas: 0
-# Cost: $0 idle, ~$6/hr active. Cold start ~2–3 min (149 GB weights load).
+# GLM-4.5-Air with min_replicas: 0
+# Cost: $0 idle, ~$10/hr active. Cold start ~90s (FP8) to ~3 min (BF16).
 #
 # Usage:
 #   sky serve up -n sonnet-serve sky/sonnet-serve.yaml
@@ -19,7 +19,7 @@ service:
     downscale_delay_seconds: 900   # 15 min idle (cold start is expensive)
 
 resources:
-  accelerators: {H100:4, A100-80GB:4, H200:4, H100:8, H200:8}
+  accelerators: {H100:4, A100-80GB:4, H200:4, H200:1, H100:8, H200:8}
   any_of:
     - cloud: runpod
     - cloud: vast
@@ -30,14 +30,18 @@ resources:
   image_id: docker:vllm/vllm-openai:v0.10.0
 
 setup: |
+  set -e
   mkdir -p ~/cache
 
 run: |
   python3 -m vllm.entrypoints.openai.api_server \
-    --model deepseek-ai/DeepSeek-V4-Flash \
+    --model zai-org/GLM-4.5-Air \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
-    --tensor-parallel-size 4 \
-    --max-model-len 65536 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 131072 \
     --gpu-memory-utilization 0.92 \
+    --enable-auto-tool-choice \
+    --tool-call-parser glm45 \
+    --trust-remote-code \
     --served-model-name sonnet-serve

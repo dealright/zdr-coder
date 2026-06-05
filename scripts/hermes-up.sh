@@ -19,12 +19,21 @@
 # Requires: ./scripts/api-up.sh already run (so LiteLLM is on :4000).
 #
 # Usage:
-#   ./scripts/hermes-up.sh                              # default model: sonnet-api
-#                                                       # (Groq GPT-OSS 120B, ~$0.20/hr active, 131K ctx)
-#   HERMES_MODEL=haiku-api ./scripts/hermes-up.sh       # cheaper Groq GPT-OSS 20B
+#   ./scripts/hermes-up.sh                              # default model: sonnet-llama
+#                                                       # (Groq Llama 3.3 70B Versatile, 128K ctx,
+#                                                       #  ~$0.59/M in $0.79/M out — non-reasoning)
+#   HERMES_MODEL=haiku-llama ./scripts/hermes-up.sh     # cheaper Groq Llama 3.1 8B
 #   HERMES_MODEL=haiku-pod ./scripts/hermes-up.sh       # self-hosted GPU (NOTE: at 8K ctx,
 #                                                       # below Hermes' 64K floor — won't work
 #                                                       # until vLLM max_model_len is raised)
+#
+# WHY NOT sonnet-api / haiku-api by default for Hermes?
+#   GPT-OSS reasoning models include `reasoning_content` in their assistant
+#   messages. Hermes (correctly) keeps that in conversation history for
+#   subsequent turns. But Groq's API rejects `reasoning_content` in assistant
+#   messages with HTTP 400, so the second turn fails. The Llama routes are
+#   non-reasoning so they round-trip cleanly. GPT-OSS still works fine for
+#   single-turn clients (OpenHands UI shows one turn at a time and clears).
 #
 # After setup, launch the TUI with: hermes
 
@@ -72,7 +81,7 @@ fi
 
 # ─── write config.yaml ──────────────────────────────────────────────────────
 
-MODEL="${HERMES_MODEL:-sonnet-api}"
+MODEL="${HERMES_MODEL:-sonnet-llama}"
 HERMES_CONFIG_DIR="$HOME/.hermes"
 HERMES_CONFIG_FILE="$HERMES_CONFIG_DIR/config.yaml"
 mkdir -p "$HERMES_CONFIG_DIR"

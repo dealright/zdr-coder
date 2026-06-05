@@ -1,10 +1,11 @@
 # zdr-coder — Opus-tier always-on inference pod
-# Kimi K2.6 (1T params, 554 GB weights) — 8× H100 80GB (640 GB) or 4× H200 (564 GB)
-# Cost: $26–$36/hr on soc2 tier (Nebius/Verda); $7.74/hr on cheap (Vast)
+# DeepSeek-V4-Pro (1.6T total / 49B active MoE, FP4+FP8 mixed precision)
+# Cost: $28–$32/hr on 8× H200 (RunPod Secure); ~$22-30/hr on Vast/Verda/Nebius
 #
-# Note: 4× H200 (564 GB) is the SWEET SPOT but availability is thin —
-# Vast has it cheapest; Verda has a clean 4× SXM5 SKU at $16/hr; Nebius
-# doesn't sell a 4× SKU (only 1× and 8×).
+# Why this model: Released April 24, 2026. MIT license, 1M context. Crucially,
+# tool calling is "good" vs the prior Kimi K2.6 pick's "mediocre" (BFCL ~64.5%)
+# — and agentic coding is the whole point of an opus-tier model. Natively
+# designed for FP4+FP8 mixed precision targeting 8× H200's 1128 GB VRAM bucket.
 #
 # Usage:
 #   sky launch -c opus-pod sky/opus-pod.yaml
@@ -14,10 +15,11 @@
 name: opus-pod
 
 resources:
-  # 8× H200 ONLY — Kimi K2 production deployment requires 1128 GB VRAM total.
-  # 4× H200 (564 GB) and 8× H100 (640 GB) BOTH OOM in production — naive
-  # "weights fit in VRAM" math undercounts BF16 attention layers + KV cache.
-  # Pinned vLLM image to v0.10.0 — Vast lacks nvcc/ninja; Lambda has too-old driver for :latest.
+  # 8× H200 ONLY — V4-Pro needs the 1128 GB bucket. FP4+FP8 mix is ~800 GB
+  # weights + KV cache for 1M context. 4× H200 (564 GB) and 8× H100 (640 GB)
+  # both OOM.
+  # NOTE: deepseek_v31 tool-call parser requires vLLM ~v0.10.x. If v0.10.0
+  # pinned image lacks it, bump to v0.10.2+ (verify Lambda driver supports it).
   image_id: docker:vllm/vllm-openai:v0.10.0
   # Backend failover pool. RunPod uses H200-SXM naming ($35.12/hr).
   # Vast: cheapest 8× H200 (~$20.71/hr France) — but offers often stale.
@@ -35,20 +37,24 @@ resources:
     - cloud: aws
       accelerators: H200:8
 
-  disk_size: 700   # GB — Kimi K2 weights ~380-554 GB
+  disk_size: 1500   # GB — DeepSeek-V4-Pro FP4+FP8 weights are ~800 GB
   ports: 8080
 
 setup: |
   mkdir -p ~/cache
 
 run: |
-  # tensor-parallel-size auto-detected from num GPUs by vLLM
+  # tensor-parallel-size auto-detected from num GPUs by vLLM.
+  # --tool-call-parser deepseek_v31: converts DeepSeek-V3.1+/V4 tool-call
+  # output into OpenAI tool_calls[]. V4-Pro uses the same parser family.
   python3 -m vllm.entrypoints.openai.api_server \
-    --model moonshotai/Kimi-K2-Instruct \
+    --model deepseek-ai/DeepSeek-V4-Pro \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --max-model-len 131072 \
     --gpu-memory-utilization 0.90 \
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v31 \
     --trust-remote-code \
     --served-model-name opus-pod

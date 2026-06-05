@@ -3,9 +3,13 @@
 # .env-runtime, which docker-compose loads. Undeployed profiles return 502 (env
 # vars unset → unreachable target) — that's expected.
 #
-# The `model:` field must match what vLLM serves under (its HF id, since
-# start.sh doesn't pass --served-model-name). Keep these in sync with the
-# MODEL defaults in scripts/deploy.sh.
+# The `model:` field below uses tier aliases (haiku-pod, sonnet-pod, etc.)
+# because sky/*.yaml now pass --served-model-name on the vllm command, decoupling
+# our route names from the underlying HF id. Current HF ids per tier:
+#   haiku-pod  → Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+#   sonnet-pod → zai-org/GLM-4.5-Air
+#   opus-pod   → deepseek-ai/DeepSeek-V4-Pro
+# Update sky/*.yaml to swap models without touching this file.
 
 model_list:
   # ── SkyPilot-launched self-hosted pods (live endpoints) ──
@@ -133,6 +137,32 @@ model_list:
   - model_name: sonnet-api
     litellm_params:
       model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+
+  # ── Llama alternatives for agentic clients (Hermes, Cline) ────────────
+  # Why not sonnet-api / haiku-api (GPT-OSS) for agents?
+  #   GPT-OSS reasoning models return `reasoning_content` in assistant
+  #   messages. Agents like Hermes preserve that in history; Groq then
+  #   rejects the next turn with HTTP 400. Fine for single-turn UIs.
+  #
+  # Why Llama 4 Scout, not Llama 3.3 70B?
+  #   Llama 3.3 70B on Groq emits malformed tool calls (raw strings like
+  #   `web_search={...}` instead of structured tool_calls). Groq's server-
+  #   side validator rejects these with `tool_use_failed`. Llama 4 Scout
+  #   (17B-active MoE, June 2026) was instruction-tuned with structured
+  #   tool calling and round-trips cleanly. Same Groq SOC2/ZDR posture.
+  #
+  # Why qwen3-32b for haiku-llama?
+  #   Qwen3 32B on Groq is also tool-tuned and ~4× cheaper than Llama 4
+  #   Scout. Best small-tier agentic pick at this price.
+  - model_name: haiku-llama
+    litellm_params:
+      model: groq/qwen/qwen3-32b
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: sonnet-llama
+    litellm_params:
+      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
       api_key: os.environ/GROQ_API_KEY
 
   # Note: there is no `opus-api` route. Groq's production catalog tops out at

@@ -1,10 +1,10 @@
 # zdr-coder — Opus-tier scale-to-zero serverless ⚠️
-# Kimi K2.6 with min_replicas: 0
-# Cost: $0 idle, ~$11/hr active. Cold start: 3–5 MIN (554 GB weights load).
+# DeepSeek-V4-Pro with min_replicas: 0
+# Cost: $0 idle, ~$28/hr active. Cold start: 4–6 MIN (~800 GB weights load).
 #
 # THE COLD-START WILL HURT. Two mitigations baked in:
-#   1. Bucket mount for weights (set BUCKET_PATH below) — ~2 min cold start
-#   2. Custom VM image with weights baked in — ~60–90s cold start
+#   1. Bucket mount for weights (set BUCKET_PATH below) — ~3 min cold start
+#   2. Custom VM image with weights baked in — ~90s cold start
 #
 # If neither is acceptable, use opus-pod.yaml (min_replicas: 1) and toggle
 # manually with `sky serve down opus-serve` / `sky serve up`.
@@ -26,23 +26,22 @@ service:
     downscale_delay_seconds: 1800   # 30 min idle (cold start is brutal)
 
 resources:
-  # 8× H200 ONLY — Kimi K2.6 needs 1128 GB VRAM (BF16 attention + KV cache
-  # blow past the naive "554 GB weights fit on 640 GB H100s" math).
-  # Production deployment: https://medium.com/@shivank1128/deploying-kimi-k2-5-on-h200-gpus-the-real-story-nobody-tells-you-7a18a6ca905a
+  # 8× H200 ONLY — DeepSeek-V4-Pro (1.6T / 49B-active MoE) needs the 1128 GB
+  # bucket. FP4+FP8 mixed precision is what makes this fit at all.
   accelerators: {H200:8}
   any_of:
     - cloud: runpod
     - cloud: vast
     - cloud: lambda
     - cloud: aws
-  disk_size: 700
+  disk_size: 1500
   ports: 8080
   image_id: docker:vllm/vllm-openai:v0.10.0
 
 # Uncomment to mount pre-staged weights bucket (cuts cold start ~50%):
 # file_mounts:
 #   /weights:
-#     source: s3://your-zdr-bucket/kimi-k2.6
+#     source: s3://your-zdr-bucket/deepseek-v4-pro
 #     mode: MOUNT
 
 setup: |
@@ -52,11 +51,13 @@ setup: |
 
 run: |
   python3 -m vllm.entrypoints.openai.api_server \
-    --model moonshotai/Kimi-K2-Instruct \
+    --model deepseek-ai/DeepSeek-V4-Pro \
     --download-dir ~/cache \
     --host 0.0.0.0 --port 8080 \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --max-model-len 131072 \
     --gpu-memory-utilization 0.90 \
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v31 \
     --trust-remote-code \
     --served-model-name opus-serve
