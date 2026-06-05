@@ -19,9 +19,12 @@
 # Requires: ./scripts/api-up.sh already run (so LiteLLM is on :4000).
 #
 # Usage:
-#   ./scripts/hermes-up.sh                              # default model: haiku-api
-#   HERMES_MODEL=sonnet-api ./scripts/hermes-up.sh      # different tier
-#   HERMES_MODEL=haiku-pod ./scripts/hermes-up.sh       # self-hosted GPU
+#   ./scripts/hermes-up.sh                              # default model: sonnet-api
+#                                                       # (Groq GPT-OSS 120B, ~$0.20/hr active, 131K ctx)
+#   HERMES_MODEL=haiku-api ./scripts/hermes-up.sh       # cheaper Groq GPT-OSS 20B
+#   HERMES_MODEL=haiku-pod ./scripts/hermes-up.sh       # self-hosted GPU (NOTE: at 8K ctx,
+#                                                       # below Hermes' 64K floor — won't work
+#                                                       # until vLLM max_model_len is raised)
 #
 # After setup, launch the TUI with: hermes
 
@@ -69,7 +72,7 @@ fi
 
 # ─── write config.yaml ──────────────────────────────────────────────────────
 
-MODEL="${HERMES_MODEL:-haiku-api}"
+MODEL="${HERMES_MODEL:-sonnet-api}"
 HERMES_CONFIG_DIR="$HOME/.hermes"
 HERMES_CONFIG_FILE="$HERMES_CONFIG_DIR/config.yaml"
 mkdir -p "$HERMES_CONFIG_DIR"
