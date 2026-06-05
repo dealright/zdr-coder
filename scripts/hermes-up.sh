@@ -96,20 +96,25 @@ cat > "$HERMES_CONFIG_FILE" <<EOF
 # (NOT recommended on production servers.)
 
 # ── Main LLM ──────────────────────────────────────────────────────────────
+# Field name is 'default' (not 'name') per Hermes' provider docs. Malformed
+# field names trigger the first-run setup wizard.
 model:
-  provider: custom                      # custom OpenAI-compatible endpoint
-  name: $MODEL                          # one of the model IDs from litellm/config.yaml
+  default: $MODEL                       # one of the model IDs from litellm/config.yaml
+  provider: custom                      # 'custom' = arbitrary OpenAI-compatible endpoint
   base_url: http://localhost:4000/v1    # local LiteLLM proxy
   api_key: $LITELLM_KEY                 # rotates with .litellm-key
+  context_length: 32000                 # safe default; Groq GPT-OSS 120B supports 131K
 
-# ── Auxiliary models (web scraping, vision) ───────────────────────────────
-# Same proxy so the ZDR story stays consistent. Override individual tasks
-# if you want them to use a faster/cheaper model than the main one.
-scraper:
-  provider: custom
-  name: haiku-api
-  base_url: http://localhost:4000/v1
-  api_key: $LITELLM_KEY
+# ── Auxiliary models (vision / web summarization / MoA) ───────────────────
+# Hermes' default is 'auto' which routes auxiliary work to the main chat
+# model — we just keep that default. To split (e.g. cheap haiku-api for
+# scraping while main model is opus-pod), uncomment and customize below.
+# auxiliary:
+#   scraper:
+#     provider: custom
+#     default: haiku-api
+#     base_url: http://localhost:4000/v1
+#     api_key: $LITELLM_KEY
 
 # ── Approval gates (the whole point) ──────────────────────────────────────
 approvals:
@@ -136,7 +141,9 @@ cat <<EOF
   Approval mode:     manual  — every dangerous shell pattern pauses for [y/n]
   Approval timeout:  300s
 
-  Launch:            hermes
+  Launch:            hermes chat                # skips the setup wizard
+                     (NOT 'hermes' alone — that triggers the first-run
+                      setup wizard which would overwrite this config)
 
   Approval UX in the TUI:
     proposed: rm -rf /var/log/old-*
