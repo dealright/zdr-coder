@@ -251,6 +251,20 @@ OpenHands spawns a fresh sandbox container per conversation. Settings → LLM �
 
 **Don't use `http://litellm:4000/v1`** even if it seems cleaner — OpenHands sandboxes are launched dynamically on the default `bridge` network and can't resolve docker-compose service names there. `host.docker.internal` is the architecturally correct choice and is what `openhands-up.sh` passes as the default env var.
 
+**Hermes Agent** (TUI + messaging-gateway, best for sysadmin / SSH / web search / scheduled tasks):
+```bash
+./scripts/hermes-up.sh                              # installs Hermes + writes ~/.hermes/config.yaml
+hermes                                              # launches the TUI
+```
+
+[Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) (MIT, 181k★ as of mid-2026) ships with 40+ built-in tools — web search, deep research, cloud browser, shell across multiple backends, cron-style scheduling, image gen, TTS, MCP server support — and a built-in self-improving learning loop. Where OpenHands shines for repo-aware coding work, Hermes shines for everything else.
+
+`hermes-up.sh` wires it to your local LiteLLM proxy and writes a safety-first config:
+- `approvals.mode: manual` — every dangerous shell command pauses for `[o]nce | [s]ession | [a]lways | [d]eny`. Covers ~50 patterns: `rm -r`, `chmod 777`, `mkfs`, `dd if=`, `sudo`, `curl | sh`, `> /etc/`, `systemctl stop`, `kill -9`, etc.
+- **Hardline blocklist** (no override): `rm -rf /`, fork bombs, `mkfs` on mounted root, `dd` to `/dev/sd*`.
+
+Switch mid-session inside the TUI with `/model haiku-pod` (or any model ID from `litellm/config.yaml`). To disable approvals for a single run (NOT for production): `hermes --yolo`.
+
 **Aider** (terminal, recommended for developers):
 ```bash
 ./scripts/aider-up.sh   # one-time
@@ -385,6 +399,7 @@ Skip the `pip install skypilot` step — the Groq path uses Level 3 API mode, no
 │   ├── sky-up.sh                   # Level 6 — bring up via SkyPilot per tier
 │   ├── sky-down.sh
 │   ├── openhands-up.sh             # browser agent UI
+│   ├── hermes-up.sh                # Nous Hermes TUI agent w/ manual approval
 │   ├── aider.sh
 │   └── smoketest.sh
 ├── .env.example
