@@ -103,7 +103,10 @@ model:
   provider: custom                      # 'custom' = arbitrary OpenAI-compatible endpoint
   base_url: http://localhost:4000/v1    # local LiteLLM proxy
   api_key: $LITELLM_KEY                 # rotates with .litellm-key
-  context_length: 32000                 # safe default; Groq GPT-OSS 120B supports 131K
+  context_length: 131000                # Hermes requires ≥64K; Groq GPT-OSS supports 131K
+                                        # Override per-model in litellm/config.yaml if any route
+                                        # serves less than 64K (e.g. haiku-pod at 8K — won't work
+                                        # with Hermes at its current vLLM --max-model-len)
 
 # ── Auxiliary models (vision / web summarization / MoA) ───────────────────
 # Hermes' default is 'auto' which routes auxiliary work to the main chat
