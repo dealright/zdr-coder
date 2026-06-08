@@ -1,0 +1,31 @@
+name: tool_repair tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tool-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: litellm/tests/requirements-dev.txt
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r litellm/tests/requirements-dev.txt
+
+      - name: Run tool_repair tests
+        run: |
+          python3 -m pytest litellm/tests/ -v --tb=short -m "not integration" --timeout=30

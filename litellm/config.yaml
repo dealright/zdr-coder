@@ -139,28 +139,74 @@ model_list:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
-  # ── Llama alternatives for agentic clients (Hermes, Cline) ────────────
-  # Why not sonnet-api / haiku-api (GPT-OSS) for agents?
-  #   GPT-OSS reasoning models return `reasoning_content` in assistant
-  #   messages. Agents like Hermes preserve that in history; Groq then
-  #   rejects the next turn with HTTP 400. Fine for single-turn UIs.
-  #
-  # Why Llama 4 Scout, not Llama 3.3 70B?
-  #   Llama 3.3 70B on Groq emits malformed tool calls (raw strings like
-  #   `web_search={...}` instead of structured tool_calls). Groq's server-
-  #   side validator rejects these with `tool_use_failed`. Llama 4 Scout
-  #   (17B-active MoE, June 2026) was instruction-tuned with structured
-  #   tool calling and round-trips cleanly. Same Groq SOC2/ZDR posture.
-  #
-  # Why qwen3-32b for haiku-llama?
-  #   Qwen3 32B on Groq is also tool-tuned and ~4× cheaper than Llama 4
-  #   Scout. Best small-tier agentic pick at this price.
+  # ── Agentic routes for tool-calling clients (Hermes, Cline) ───────────
+  # PRIMARY = AWS Bedrock w/ Qwen3-Coder. Why this swap (June 2026):
+  #   Groq's server-side tool-call validator rejects ANY malformed call
+  #   with `tool_use_failed`, which LiteLLM's int-parse trips on (HTTP 500).
+  #   Even Llama 4 Scout occasionally malforms in multi-turn under heavy
+  #   tool registration (Hermes auto-loads ~28 toolsets). Bedrock doesn't
+  #   do server-side tool-name validation, so model output round-trips
+  #   cleanly. Same model (Qwen3-Coder-30B-A3B) we'd otherwise self-host
+  #   on haiku-pod — now as managed API, scale-to-zero, $0 idle.
+  #   AWS BAA covers it (user already signed). ~172ms first-token latency.
+  # haiku-llama: Qwen3-Coder 30B/3B-active on Bedrock. Cheap and fast.
+  # CAVEAT: Bedrock's Converse API doesn't natively parse Qwen3-Coder's
+  # `<function=name>...</function>` XML tool-call format, so multi-turn
+  # agentic loops may need tool_repair.py's XML parser (TODO). For now,
+  # use this for SINGLE-turn coding tasks. Use sonnet-llama for multi-turn.
   - model_name: haiku-llama
+    litellm_params:
+      model: bedrock/converse/qwen.qwen3-coder-30b-a3b-v1:0
+      aws_region_name: us-east-1
+
+  # sonnet-llama: DeepSeek V3.2 on Bedrock. The deep-research workflow's
+  # specific recommendation for agentic-sonnet. Clean tool_calls[] in both
+  # streaming and non-streaming, ZDR default-on, BAA covered, ~$3-8/M
+  # tokens (vs Mistral Large 3 at ~$3-15/M). The previous Mistral Large 3
+  # route is still available as `opus-bedrock` for opus-class needs.
+  - model_name: sonnet-llama
+    litellm_params:
+      model: bedrock/converse/deepseek.v3.2
+      aws_region_name: us-east-1
+
+  # ── Bedrock catalog — additional routes for specific use cases ────────
+  # Qwen3-VL 235B for vision (Claude vision replacement on Bedrock)
+  - model_name: vision-bedrock
+    litellm_params:
+      model: bedrock/converse/qwen.qwen3-vl-235b-a22b
+      # Creds come from ~/.aws/credentials (mounted into the container by
+      # docker-compose.yml at /root/.aws). boto3 default credential chain
+      # discovers them automatically.
+      aws_region_name: us-east-1
+
+  # Mistral Large 3 675B — opus-class managed (vs self-hosting V4-Pro on 8xH200)
+  - model_name: opus-bedrock
+    litellm_params:
+      model: bedrock/converse/mistral.mistral-large-3-675b-instruct
+      # Creds come from ~/.aws/credentials (mounted into the container by
+      # docker-compose.yml at /root/.aws). boto3 default credential chain
+      # discovers them automatically.
+      aws_region_name: us-east-1
+
+  # DeepSeek V3.2 on Bedrock — same family as our self-host sonnet/opus picks
+  - model_name: sonnet-deepseek-bedrock
+    litellm_params:
+      model: bedrock/converse/deepseek.v3.2
+      # Creds come from ~/.aws/credentials (mounted into the container by
+      # docker-compose.yml at /root/.aws). boto3 default credential chain
+      # discovers them automatically.
+      aws_region_name: us-east-1
+
+  # ── Groq Llama as fallback (kept for cost-sensitive single-turn use) ──
+  # These were the prior sonnet-llama / haiku-llama. They DO work for
+  # single-turn or low-tool-count agentic loops where Groq's strict
+  # validation doesn't trip. Cheaper than Bedrock; ~10x faster TTFT.
+  - model_name: haiku-llama-groq
     litellm_params:
       model: groq/qwen/qwen3-32b
       api_key: os.environ/GROQ_API_KEY
 
-  - model_name: sonnet-llama
+  - model_name: sonnet-llama-groq
     litellm_params:
       model: groq/meta-llama/llama-4-scout-17b-16e-instruct
       api_key: os.environ/GROQ_API_KEY
@@ -186,8 +232,16 @@ model_list:
 
 litellm_settings:
   drop_params: true
-  set_verbose: false
-  turn_off_message_logging: true
+  # DEBUG MODE — flip these BACK to `false` and `true` respectively before
+  # treating this proxy as production-ish. Currently on so we can debug the
+  # Groq streaming tool-call failure path:
+  set_verbose: true
+  turn_off_message_logging: false
+  json_logs: false
+  # Tool-call repair callback — see litellm/tool_repair.py. Fixes Groq's
+  # `tool_use_failed` int-parse crash AND rewrites raw-text tool calls
+  # into proper tool_calls[] arrays before they reach the client.
+  callbacks: tool_repair.tool_repair_handler
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

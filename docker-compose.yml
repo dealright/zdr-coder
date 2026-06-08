@@ -28,8 +28,21 @@ services:
         required: false
       - path: .env-runtime
         required: false
+    environment:
+      # Debug mode for the tool-call failure path. Drop this stanza once we
+      # confirm the streaming hook is catching tool_use_failed cleanly.
+      LITELLM_LOG: DEBUG
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
+      # Tool-call repair callback. Catches Groq's `tool_use_failed` string
+      # error code so LiteLLM's int-parse doesn't crash on it, and rewrites
+      # malformed tool calls from weak models into proper tool_calls[] arrays.
+      # Referenced from config.yaml as `tool_repair.tool_repair_handler`.
+      - ./litellm/tool_repair.py:/app/tool_repair.py:ro
+      # AWS shared-credentials file (read-only). Required for Bedrock routes —
+      # boto3's default credential chain reads this when AWS_ACCESS_KEY_ID env
+      # isn't set. Keeps credentials out of .env / docker-compose / git.
+      - ${HOME}/.aws:/root/.aws:ro
     command:
       - --config
       - /app/config.yaml
