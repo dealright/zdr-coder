@@ -13,10 +13,14 @@ Coverage owned by THIS file (and only this file):
   * vLLM port == 8080
   * Run block uses `python3 -m vllm` (regression — we got bitten by `python `)
   * Run block sets `--served-model-name <expected>` matching the file's tier
-  * Pods using new models declare the correct `--tool-call-parser`:
-      haiku-pod/haiku-serve  -> qwen3_xml
-      sonnet-pod/sonnet-serve -> glm45
-      opus-pod/opus-serve     -> deepseek_v31
+  * Pods using new models declare the correct `--tool-call-parser`. NOTE:
+    these names are the vLLM v0.10.0 actual choices (verified against the
+    api_server.py --tool-call-parser argparse list). Newer names like
+    `qwen3_xml` / `glm45` / `deepseek_v31` exist in vLLM main but NOT in 0.10.0.
+    Bump these when we bump the docker image tag.
+      haiku-pod/haiku-serve   -> qwen3_coder
+      sonnet-pod/sonnet-serve -> glm4_moe
+      opus-pod/opus-serve     -> deepseek_v3
   * `stage-opus-weights.yaml` references DeepSeek-V4-Pro (current opus weights)
 
 Other test files (`test_dsml_regex.py`, `test_failure_hook.py`,
@@ -52,12 +56,12 @@ SERVING_YAMLS = [
 # Drift here is the #1 reason agentic clients silently get raw text instead of
 # OpenAI tool_calls[].
 EXPECTED_PARSER = {
-    "haiku-pod.yaml": "qwen3_xml",
-    "haiku-serve.yaml": "qwen3_xml",
-    "sonnet-pod.yaml": "glm45",
-    "sonnet-serve.yaml": "glm45",
-    "opus-pod.yaml": "deepseek_v31",
-    "opus-serve.yaml": "deepseek_v31",
+    "haiku-pod.yaml": "qwen3_coder",
+    "haiku-serve.yaml": "qwen3_coder",
+    "sonnet-pod.yaml": "glm4_moe",
+    "sonnet-serve.yaml": "glm4_moe",
+    "opus-pod.yaml": "deepseek_v3",
+    "opus-serve.yaml": "deepseek_v3",
 }
 
 # served-model-name should equal the filename stem so LiteLLM's config.yaml

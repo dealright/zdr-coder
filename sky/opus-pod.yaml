@@ -18,7 +18,7 @@ resources:
   # 8× H200 ONLY — V4-Pro needs the 1128 GB bucket. FP4+FP8 mix is ~800 GB
   # weights + KV cache for 1M context. 4× H200 (564 GB) and 8× H100 (640 GB)
   # both OOM.
-  # NOTE: deepseek_v31 tool-call parser requires vLLM ~v0.10.x. If v0.10.0
+  # NOTE: deepseek_v3 tool-call parser requires vLLM ~v0.10.x. If v0.10.0
   # pinned image lacks it, bump to v0.10.2+ (verify Lambda driver supports it).
   image_id: docker:vllm/vllm-openai:v0.10.0
   # Backend failover pool. RunPod uses H200-SXM naming ($35.12/hr).
@@ -45,7 +45,7 @@ setup: |
 
 run: |
   # tensor-parallel-size auto-detected from num GPUs by vLLM.
-  # --tool-call-parser deepseek_v31: converts DeepSeek-V3.1+/V4 tool-call
+  # --tool-call-parser deepseek_v3: converts DeepSeek-V3.1+/V4 tool-call
   # output into OpenAI tool_calls[]. V4-Pro uses the same parser family.
   python3 -m vllm.entrypoints.openai.api_server \
     --model deepseek-ai/DeepSeek-V4-Pro \
@@ -55,6 +55,6 @@ run: |
     --max-model-len 131072 \
     --gpu-memory-utilization 0.90 \
     --enable-auto-tool-choice \
-    --tool-call-parser deepseek_v31 \
+    --tool-call-parser deepseek_v3 \
     --trust-remote-code \
     --served-model-name opus-pod

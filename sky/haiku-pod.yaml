@@ -6,10 +6,10 @@
 # means roughly 10× the throughput of the prior Qwen2.5-Coder-32B dense pick at
 # the same GPU footprint. 256K native context (vs 8K we'd been pinned to).
 # BFCL v3 ~70.8% — good enough for agentic tool calls when paired with the
-# qwen3_xml parser below.
+# qwen3_coder parser below.
 #
-# Why qwen3_xml parser (not qwen3_coder): vLLM's `qwen3_coder` parser has
-# documented infinite-output bugs on long-context tool calls; `qwen3_xml` is
+# Why qwen3_coder parser (not qwen3_coder): vLLM's `qwen3_coder` parser has
+# documented infinite-output bugs on long-context tool calls; `qwen3_coder` is
 # the maintained successor for Qwen3-Coder family XML-tagged tool calls.
 #
 # Usage:
@@ -46,7 +46,7 @@ setup: |
 
 run: |
   # Override the image's entrypoint and run vLLM directly.
-  # --enable-auto-tool-choice + --tool-call-parser qwen3_xml: convert the
+  # --enable-auto-tool-choice + --tool-call-parser qwen3_coder: convert the
   # model's <tool_call>{...}</tool_call> XML output into OpenAI tool_calls[].
   # Without this, agentic clients (Hermes, Cline) get raw text and fail.
   python3 -m vllm.entrypoints.openai.api_server \
@@ -56,5 +56,5 @@ run: |
     --max-model-len 32768 \
     --gpu-memory-utilization 0.92 \
     --enable-auto-tool-choice \
-    --tool-call-parser qwen3_xml \
+    --tool-call-parser qwen3_coder \
     --served-model-name haiku-pod
