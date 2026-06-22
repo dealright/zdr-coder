@@ -29,9 +29,11 @@ services:
       - path: .env-runtime
         required: false
     environment:
-      # Debug mode for the tool-call failure path. Drop this stanza once we
-      # confirm the streaming hook is catching tool_use_failed cleanly.
-      LITELLM_LOG: DEBUG
+      # ZDR: DEBUG/INFO dump full request bodies (prompts) to stdout and OVERRIDE
+      # the config's set_verbose/turn_off_message_logging. Keep at ERROR so no
+      # prompt/response content is written to local logs (logs are in-scope for
+      # ZDR/HIPAA). Was DEBUG for a past Groq tool-call investigation.
+      LITELLM_LOG: ERROR
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
       # Tool-call repair callback. Catches Groq's `tool_use_failed` string

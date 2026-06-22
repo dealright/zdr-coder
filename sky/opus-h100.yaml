@@ -1,0 +1,79 @@
+# zdr-coder — Opus-class always-on pod that FITS ON 8× H100 (640 GB)
+# Qwen3-Coder-480B-A35B-Instruct-FP8 (480B total / 35B active MoE, fine-grained FP8)
+# Cost: ~$26/hr on 8× H100 SXM (RunPod Secure); ~$15/hr on Vast 8× H100.
+# $0 only when you `sky down`.
+#
+# Why this model (deep-research winner, 103-agent run, over GLM-4.7):
+#   - Purpose-built for AGENTIC TOOL-USE; SOTA open coding ≈ Claude Sonnet 4.
+#   - Dedicated `qwen3_coder` parser ALREADY PROVEN in this repo's haiku-pod.
+#   - STABLE vLLM support (v0.10.0+, the image we already pin) — unlike GLM-4.7,
+#     which is main-branch/nightly-only (unstable, driver-sensitive).
+#   - The GLM tool-parser family has documented multi-turn tool-call bugs — the
+#     exact failure surface a 28-tool Hermes agent hammers. Qwen avoids it.
+#   ~447-482 GB FP8 weights fit in ~576 GB usable → ~95-130 GB KV. Enough for a
+#   28-tool multi-turn loop at up to 131K context (KV is the limit for heavy
+#   parallelism / many simultaneous agents — that's the tradeoff vs GLM-4.7).
+#
+# ⚠️ FP8 PARALLELISM — two landmines, learned the hard way:
+#   1. Pure --tensor-parallel-size 8 (no EP) FAILS: "output_size of gate/up = 320
+#      not divisible by quant block_n = 128" — TP dimension-shards the FP8 experts.
+#   2. The official recipe's --data-parallel-size 8 --enable-expert-parallel
+#      REPLICATES the ~11 GB non-expert weights on EVERY rank → ~70 GB/GPU on top
+#      of KV → OOMs on 80 GB H100 (the recipe targets 192 GB MI300x). Verified:
+#      crash-looped on init after the full download, 2026-06-21.
+#   FIX for 80 GB H100 = TP + EP together: --tensor-parallel-size 8
+#   --enable-expert-parallel. TP shards the dense/attention weights (no
+#   replication, ~60 GB/GPU), EP keeps experts WHOLE (so the 320-dim never gets
+#   split → dodges landmine #1). DeepGEMM is the CUDA FP8 path (AMD: AITER).
+#
+# H100 SXM (NVLink), not PCIe: expert-parallel MoE does heavy all-to-all between
+# GPUs — PCIe (~64 GB/s) bottlenecks badly vs SXM NVLink (~900 GB/s). The pool
+# below pins -SXM on RunPod for this reason.
+#
+# Usage (force RunPod — optimizer otherwise picks cheaper Vast):
+#   .venv-sky/bin/sky launch -c opus-h100 sky/opus-h100.yaml --infra runpod \
+#       --retry-until-up --idle-minutes-to-autostop 30
+#   ./scripts/api-up.sh                # reload LiteLLM with the opus-h100 route
+#   .venv-sky/bin/sky down opus-h100   # stops billing
+
+name: opus-h100
+
+resources:
+  # v0.10.0 = recipe minimum AND the repo's proven Qwen3-Coder image (haiku-pod).
+  image_id: docker:vllm/vllm-openai:v0.10.0
+  any_of:
+    # RunPod Secure SXM — NVLink, HTTPS proxy, SOC2/BAA path. The AP-IN-1 email
+    # that prompted this; SkyPilot routes to CA. ~$26/hr.
+    - cloud: runpod
+      accelerators: H100-SXM:8
+    # Vast 8× H100 SXM (~$15/hr) — cheapest; plain-HTTP leg (see COMPLIANCE.md).
+    - cloud: vast
+      accelerators: H100:8
+    # AWS p5.48xlarge (8× H100) — compliance fallback, capacity-constrained.
+    - cloud: aws
+      accelerators: H100:8
+
+  disk_size: 800   # GB — 480B FP8 weights ~447-482 GB + HF download/cache slack
+  ports: 8080
+
+setup: |
+  set -e
+  mkdir -p ~/cache
+
+run: |
+  # FP8 480B MoE on 8× H100: DATA-parallel + EXPERT-parallel (NOT tensor-parallel
+  # — see header: TP=8 fails on FP8 block-quant). VLLM_USE_DEEP_GEMM=1 is the CUDA
+  # FP8 fast path. qwen3_coder parser converts <tool_call> XML → OpenAI
+  # tool_calls[] so Hermes/Cline get structured calls instead of raw text.
+  VLLM_USE_DEEP_GEMM=1 python3 -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 \
+    --download-dir ~/cache \
+    --host 0.0.0.0 --port 8080 \
+    --max-model-len 65536 \
+    --gpu-memory-utilization 0.92 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --enable-expert-parallel \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --trust-remote-code \
+    --served-model-name opus-h100

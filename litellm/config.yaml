@@ -39,6 +39,17 @@ model_list:
       api_base: os.environ/OPUS_POD_API_BASE
       api_key: dummy
 
+  # opus-h100: Qwen3-Coder-480B-A35B-FP8 self-hosted on 8× H100 (sky/opus-h100.yaml).
+  # The opus-class route that FITS ON H100 — unlike opus-pod's V4-Pro (8× H200 only).
+  # Deep-research winner for agentic tool-use; dedicated qwen3_coder parser, stable
+  # vLLM v0.10.0+ (no nightly). Launched by sky launch ... --infra runpod, then
+  # ./scripts/api-up.sh refreshes OPUS_H100_API_BASE.
+  - model_name: opus-h100
+    litellm_params:
+      model: openai/opus-h100
+      api_base: os.environ/OPUS_H100_API_BASE
+      api_key: dummy
+
   - model_name: haiku-serve
     litellm_params:
       model: openai/haiku-serve
@@ -72,12 +83,14 @@ model_list:
       api_base: os.environ/HAIKU_SERVERLESS_API_BASE
       api_key: os.environ/HAIKU_SERVERLESS_API_KEY
 
-  # DeepSeek V4 Flash on RunPod Serverless — 4× H100 80GB per worker, scales
-  # to zero. Cold start is ~5-10 min on first request (149 GiB FP8 download).
+  # Qwen2.5-72B-Instruct-AWQ on RunPod Serverless — single A100/H200 (80-141GB),
+  # scales to zero. Cold start ~3-5 min on first request (36 GiB AWQ download).
+  # Single-GPU avoids multi-GPU serverless provisioning failures. Restricted to
+  # 80 GB+ GPUs so 72B AWQ leaves ~36 GB for KV cache (16K context comfortable).
   # Provisioned by scripts/deploy-serverless.sh sonnet.
   - model_name: sonnet-serverless
     litellm_params:
-      model: openai/deepseek-ai/DeepSeek-V4-Flash
+      model: openai/Qwen/Qwen2.5-72B-Instruct-AWQ
       api_base: os.environ/SONNET_SERVERLESS_API_BASE
       api_key: os.environ/SONNET_SERVERLESS_API_KEY
 
@@ -188,6 +201,70 @@ model_list:
       # discovers them automatically.
       aws_region_name: us-east-1
 
+  # sonnet-glm: Z.AI GLM 4.7 Flash on Bedrock. Lightweight, cost-efficient
+  # GLM family option marketed by AWS as "purpose-built for production
+  # deployment." HIPAA BAA covered, ZDR default-on. GLM 5 (the full 744B/40B
+  # variant) is also active on Bedrock — use `opus-glm` below for that tier.
+  # NOTE: GLM 5.2 (released June 13, 2026) is NOT YET on Bedrock; check back
+  # in 1-3 weeks for the typical add cadence.
+  - model_name: sonnet-glm
+    litellm_params:
+      model: bedrock/converse/zai.glm-4.7-flash
+      aws_region_name: us-east-1
+
+  # opus-glm: Z.AI GLM 5 (the full predecessor to 5.2) on Bedrock. opus-class
+  # MoE (744B total / 40B active per token), HIPAA-covered, ZDR default-on.
+  - model_name: opus-glm
+    litellm_params:
+      model: bedrock/converse/zai.glm-5
+      aws_region_name: us-east-1
+
+  # opus-claude: Genuine Claude Opus via Bedrock. Under YOUR AWS BAA,
+  # ZDR default-on, NOT under Anthropic's consumer terms. Use this for the
+  # gnarly ~5% of tasks where genuine Opus-class reasoning matters.
+  # Most expensive route in the stack (~$15/M in, ~$75/M out, similar to
+  # Anthropic list price). Don't default to this — reach for it.
+  #
+  # Currently pointing at Opus 4.6 because that's the newest version this
+  # account already has model-access for. To upgrade to 4.7 or 4.8 (the
+  # latest as of June 2026):
+  # 1. Open Bedrock console → Model access
+  #    https://us-east-1.console.aws.amazon.com/bedrock/home#/modelaccess
+  # 2. Modify model access → check Opus 4.8 → Submit (instant for established
+  #    accounts; ~30-60 min cold start for first-time requests)
+  # 3. Change the model line below to us.anthropic.claude-opus-4-8
+  # 4. docker compose up -d --force-recreate litellm
+  - model_name: opus-claude
+    litellm_params:
+      model: bedrock/converse/us.anthropic.claude-opus-4-6-v1
+      aws_region_name: us-east-1
+
+  # ── OPTIONAL: direct Z.ai API for GLM 5.2 (NOT HIPAA-COMPATIBLE) ──────
+  # GLM 5.2 (released June 13, 2026) is Z.ai's flagship: 744B/40B MoE,
+  # 1M token context, MIT license. As of June 15 2026 it's accessible only
+  # via Z.ai's direct API (Coding Plan subscribers; public pay-per-token API
+  # arrives ~June 20 2026). Bedrock typically adds new Z.AI models 1-3
+  # weeks after release.
+  #
+  # ⚠️  IMPORTANT: Z.ai's direct API routes traffic through Z.ai's
+  # infrastructure in CHINA. This is INCOMPATIBLE with HIPAA workloads
+  # involving US healthcare data, and may conflict with other
+  # data-residency requirements. Use ONLY for non-sensitive experiments.
+  #
+  # Activated only when Z_AI_API_KEY is set in .env. Without the key, the
+  # route returns 401 (silent, expected). To activate:
+  #   1. Register/login at https://z.ai/model-api (Z.ai Open Platform)
+  #   2. Subscribe to GLM Coding Plan ($10-80/mo) for GLM 5.2 access today,
+  #      OR wait for the public pay-per-token API (~June 20 2026)
+  #   3. Generate a key at https://z.ai/manage-apikey/apikey-list
+  #   4. Add `Z_AI_API_KEY=...` to .env
+  #   5. docker compose up -d --force-recreate litellm
+  - model_name: sonnet-glm-zai
+    litellm_params:
+      model: openai/glm-5.2
+      api_base: https://api.z.ai/api/paas/v4
+      api_key: os.environ/Z_AI_API_KEY
+
   # DeepSeek V3.2 on Bedrock — same family as our self-host sonnet/opus picks
   - model_name: sonnet-deepseek-bedrock
     litellm_params:
@@ -232,11 +309,11 @@ model_list:
 
 litellm_settings:
   drop_params: true
-  # DEBUG MODE — flip these BACK to `false` and `true` respectively before
-  # treating this proxy as production-ish. Currently on so we can debug the
-  # Groq streaming tool-call failure path:
-  set_verbose: true
-  turn_off_message_logging: false
+  # ZDR/PRODUCTION MODE: prompt + response content must NOT hit local logs —
+  # your own logs are in-scope for ZDR/HIPAA. Verbose off + message logging off.
+  # (Was DEBUG MODE for a past Groq tool-call investigation; flipped 2026-06-21.)
+  set_verbose: false
+  turn_off_message_logging: true
   json_logs: false
   # Tool-call repair callback — see litellm/tool_repair.py. Fixes Groq's
   # `tool_use_failed` int-parse crash AND rewrites raw-text tool calls

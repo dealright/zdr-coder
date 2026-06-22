@@ -101,6 +101,45 @@ if [[ ! -d .venv-sky ]]; then
 fi
 SKY=".venv-sky/bin/sky"
 
+# ──────────────── 🌟 provider recommendations ─────────────────
+
+hr
+bold "💡 Provider recommendations — read this first"
+echo
+echo "For 95% of users, ONE backend covers nearly everything:"
+echo
+green "  ⭐ AWS Bedrock — the recommended primary"
+echo "     • Simplicity:  one credential (your AWS access key) unlocks ~7 models —"
+echo "                    DeepSeek V3.2, Mistral Large 3, Qwen3-Coder, Qwen3-VL,"
+echo "                    GLM 4.7 Flash, GLM 5, Claude Opus 4.6"
+echo "     • Compliance:  HIPAA BAA self-serve, SOC2 T1+T2, ISO 27001, FedRAMP High,"
+echo "                    PCI DSS, GDPR — ZDR is DEFAULT-ON, can't even be disabled"
+echo "     • Pricing:     pay-per-token, \$0 idle, no minimums, ~\$0.07–\$8 per M tokens"
+echo "                    depending on model. Cheapest sonnet-tier you can get w/ BAA."
+echo "     • Audit logs:  native CloudWatch invocation logging (one-line enable later)"
+echo
+yellow "     ⚠️  THE ONLY DOWNSIDE: SMS verification required for AWS account creation."
+yellow "         If you already have an AWS account, you're past this step."
+echo
+echo "Other providers are optional additions, not replacements:"
+echo
+echo "  • Groq         — Fastest + cheapest sonnet (\$0.11/\$0.34/M, no SMS, no card)."
+echo "                   BAA on request only — NOT HIPAA-by-default. Single-turn workloads."
+echo "  • Z.ai direct  — GLM 5.2 (744B MoE, 1M context, latest model). NOT HIPAA —"
+echo "                   routes through Chinese infrastructure. Non-PHI experiments only."
+echo "  • RunPod/Vast  — self-hosted GPU pods. Full data sovereignty, but ops overhead +"
+echo "                   \$2–\$30/hr active. Skip unless you specifically need self-host."
+echo "  • Lambda Labs  — same shape as RunPod/Vast. Cheapest A100 SKU in our testing."
+echo "  • HuggingFace  — for gated models (Llama 3.3 70B, etc.). Free tier, no SMS."
+echo
+green "  New here and just want it to work?"
+echo "    → Stick with ZDR_TIER=soc2 or =hipaa, set up AWS only, skip the rest."
+echo "    → You can re-run ./scripts/setup.sh anytime to add more providers."
+echo
+hr
+echo "Press Enter to continue (or Ctrl+C to edit ZDR_TIER in .env first)..."
+read -r _
+
 # ─────────────────────── determine tier ────────────────────────
 
 [[ -f .env ]] || cp .env.example .env
@@ -307,6 +346,9 @@ setup_aws() {
 
   echo "═══ STEP 1: Account + BAA (5 min, instant) ═══"
   echo "  1. Sign up: https://aws.amazon.com (skip if you have an account)"
+  yellow "       ⚠️  New AWS accounts require SMS verification (phone)."
+  yellow "       This is the only SMS gate in the whole zdr-coder setup."
+  yellow "       If you already have an AWS account, you've already done this."
   echo "  2. BAA (HIPAA): https://us-east-1.console.aws.amazon.com/artifact/"
   echo "       Artifact → Agreements → AWS Business Associate Addendum → Accept"
   echo "       (instant click-through; no waiting; no sales contact)"

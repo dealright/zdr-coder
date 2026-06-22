@@ -8,7 +8,7 @@
 #         ./scripts/deploy-serverless.sh sonnet
 #
 # haiku  → 32B-AWQ on 24/32/48GB pools (cheapest, bursty use)
-# sonnet → DeepSeek V4 Flash FP8 on 4× H100 80GB (needs Hopper for FP8)
+# sonnet → Qwen3-72B-AWQ on 48/80/141GB pools (single GPU, sonnet-class)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -64,22 +64,24 @@ case "$PROFILE" in
     GPU_COUNT="${GPU_COUNT:-1}"
     ;;
   sonnet)
-    # DeepSeek V4 Flash FP8 (~149 GiB weights) needs Hopper or Blackwell for
-    # FP8 kernels — Ampere A100 has no FP8 hardware. RunPod serverless does
-    # NOT expose H100 80GB as a pool (verified May 2026). Valid FP8-capable
-    # pools: HOPPER_141 (H200 141GB), BLACKWELL_96 (B200 96GB), BLACKWELL_180.
-    # Default to 2× H200 = 282 GiB → ~133 GiB free for KV at MAX_LEN=65536.
+    # Qwen2.5-72B-Instruct-AWQ: pre-quantized 4-bit (~36 GiB weights), single GPU.
+    # Multi-GPU serverless (the prior DeepSeek V4 Flash 2×H200 setup) is too
+    # flaky on RunPod — workers consistently fail to initialize. Single-GPU AWQ
+    # avoids the coordination overhead entirely. We restrict to 80 GB+ GPUs
+    # (A100/H200) because 72B AWQ leaves only ~7 GB KV headroom on 48 GB GPUs —
+    # too tight for any useful context. On A100 80 GB: 80×0.90=72 GB available,
+    # 36 GB model → 36 GB KV, which handles 8-16K context comfortably.
+    # Qwen2.5-72B is solidly sonnet-class and well-tested with vLLM.
     WORKER_IMAGE="${WORKER_IMAGE:-runpod/worker-v1-vllm:v2.18.1}"
-    MODEL="${MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
-    GPU_IDS="${GPU_IDS:-HOPPER_141,BLACKWELL_180}"
-    GPU_COUNT="${GPU_COUNT:-2}"
-    MAX_LEN="${MAX_LEN:-65536}"
-    GPU_UTIL="${GPU_UTIL:-0.92}"
-    QUANTIZATION="${QUANTIZATION:-fp8}"
-    TP_SIZE="${TP_SIZE:-2}"
-    # 149 GiB weights + ~10 GiB worker + HF cache slack. 250 GiB is the safe
-    # minimum; the cold-start download stalls below that.
-    CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-250}"
+    MODEL="${MODEL:-Qwen/Qwen2.5-72B-Instruct-AWQ}"
+    GPU_IDS="${GPU_IDS:-AMPERE_80,HOPPER_141}"
+    GPU_COUNT="${GPU_COUNT:-1}"
+    MAX_LEN="${MAX_LEN:-16384}"
+    GPU_UTIL="${GPU_UTIL:-0.90}"
+    QUANTIZATION="${QUANTIZATION:-awq}"
+    TP_SIZE="${TP_SIZE:-1}"
+    # 36 GiB model + ~10 GiB worker image + HF cache slack. 80 GiB is plenty.
+    CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-80}"
     ;;
 esac
 
@@ -158,7 +160,7 @@ if [ -z "$ENDPOINT_ID" ]; then
     '{ input: {
       name: $name, templateId: $tid, gpuIds: $gpu, gpuCount: $gpuCount,
       workersMin: 0, workersMax: 1,
-      idleTimeout: 5, executionTimeoutMs: 600000,
+      idleTimeout: 300, executionTimeoutMs: 600000,
       scalerType: "QUEUE_DELAY", scalerValue: 4
     } }')
   R=$(gql 'mutation($input: EndpointInput!){ saveEndpoint(input: $input) { id name } }' "$ENDPOINT_VARS")
