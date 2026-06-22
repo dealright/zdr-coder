@@ -38,6 +38,8 @@ MANAGED_ROUTES = [
     "opus-bedrock",
     "vision-bedrock",
     "sonnet-deepseek-bedrock",
+    "sonnet-glm",  # GLM 4.7 Flash on Bedrock — now a worker-pool bucket
+    "worker",      # load-balanced fan-out pool (DeepSeek V3.2 + GLM)
 ]
 
 

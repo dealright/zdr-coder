@@ -239,6 +239,41 @@ model_list:
       model: bedrock/converse/us.anthropic.claude-opus-4-6-v1
       aws_region_name: us-east-1
 
+  # ── worker: fan-out pool for agentic swarms (Hermes delegate_task) ────
+  # PURPOSE: a 16-50 wide fan-out must NOT hit opus-claude — that route is
+  # scarce (Bedrock throttles it instantly: 429 "Too many requests") AND
+  # expensive (~$15/$75 per M). Point delegate_task at `worker` instead;
+  # reserve opus-claude for the lead/orchestrator + the ~5% genuinely-hard
+  # subtasks.
+  #
+  # Two fully-managed *serverless* Bedrock models, load-balanced so the
+  # swarm spreads across TWO separate quota buckets instead of hammering
+  # one. Both are us-east-1 in-region under the SAME AWS BAA / ZDR posture
+  # as opus-claude: prompts + outputs are NOT shared with the model
+  # developer, NOT used for training, and never leave AWS (verified
+  # 2026-06-21 against AWS Bedrock data-protection terms + the DeepSeek
+  # serverless statement; Z.AI rests on the same Bedrock-wide guarantee +
+  # its per-provider additional terms). These are AWS-HOSTED weights —
+  # NOT the Z.AI direct API (sonnet-glm-zai), which routes through China
+  # and is NOT HIPAA-compatible.
+  #
+  # DeepSeek is weighted 3:1 over GLM: GLM 4.7 Flash caps output at 4K
+  # tokens (fine for tool turns, truncates long write-ups), whereas
+  # DeepSeek V3.2 has no such cap and is the config's blessed agentic
+  # pick ("clean tool_calls[] in streaming and non-streaming"). GLM is
+  # the second bucket for burst headroom. If BOTH throttle, router_settings
+  # below falls the group back to opus-glm (GLM 5 — a third quota bucket).
+  - model_name: worker
+    litellm_params:
+      model: bedrock/converse/deepseek.v3.2
+      aws_region_name: us-east-1
+      weight: 3
+  - model_name: worker
+    litellm_params:
+      model: bedrock/converse/zai.glm-4.7-flash
+      aws_region_name: us-east-1
+      weight: 1
+
   # ── OPTIONAL: direct Z.ai API for GLM 5.2 (NOT HIPAA-COMPATIBLE) ──────
   # GLM 5.2 (released June 13, 2026) is Z.ai's flagship: 744B/40B MoE,
   # 1M token context, MIT license. As of June 15 2026 it's accessible only
@@ -323,3 +358,28 @@ litellm_settings:
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   disable_spend_logs: true
+
+# ── Router: load-balancing, retries, and throttle fallbacks ───────────
+# Why this exists: a 16-50 wide agentic fan-out (Hermes delegate_task) was
+# hammering ONE Bedrock model group and getting HTTP 429 "Too many
+# requests" with "Available Model Group Fallbacks=None". The `worker`
+# group above spreads load across two buckets; the settings here add the
+# missing resilience:
+#   - fallbacks: when a group throttles, spill to another Bedrock route
+#     instead of failing the request outright.
+#   - allowed_fails + cooldown_time: pull a 429'ing deployment out of
+#     rotation for 30s so parallel agents stop colliding on it in lockstep
+#     (the synchronized-retry death spiral seen in the Hermes logs).
+#   - simple-shuffle: honors the per-deployment `weight` on the worker pool
+#     (DeepSeek 3 : GLM 1). No Redis needed — single proxy instance.
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 3
+  retry_after: 5
+  allowed_fails: 2
+  cooldown_time: 30
+  retry_policy:
+    RateLimitErrorRetries: 3
+  fallbacks:
+    - opus-claude: ["opus-glm", "opus-bedrock"]
+    - worker: ["opus-glm"]
