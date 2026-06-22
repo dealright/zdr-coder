@@ -20,6 +20,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_DIR="$(pwd)"
 UNIT=/etc/systemd/system/zdr-coder.service
+# The service runs as root, and docker-compose.yml mounts ${HOME}/.aws into the
+# container for Bedrock creds. systemd does NOT set HOME for root services — it's
+# empty, so ${HOME}/.aws resolves to /.aws and Bedrock 401s. Pin HOME to root's
+# home so the mount points at the real creds.
+SVC_HOME="$(getent passwd root 2>/dev/null | cut -d: -f6)"; SVC_HOME="${SVC_HOME:-/root}"
 
 [ "$(uname -s)" = Linux ]       || { echo "FAIL: Linux/systemd only (host is $(uname -s)). On macOS, Docker Desktop + the container's restart:unless-stopped already restores it on login." >&2; exit 1; }
 command -v systemctl >/dev/null || { echo "FAIL: systemctl not found (no systemd)." >&2; exit 1; }
@@ -35,6 +40,8 @@ fi
 
 command -v docker >/dev/null || { echo "FAIL: docker not installed." >&2; exit 1; }
 
+[ -f "${SVC_HOME}/.aws/credentials" ] || echo "⚠️  ${SVC_HOME}/.aws/credentials not found — Bedrock routes (opus-claude, opus-glm, …) will 401 until it's present."
+
 cat > "$UNIT" <<'UNIT_EOF'
 [Unit]
 Description=zdr-coder — local LiteLLM proxy (auto-start; tailnet-bound when Tailscale present)
@@ -47,6 +54,9 @@ Wants=tailscaled.service network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=__REPO_DIR__
+# Pin HOME so docker-compose's ${HOME}/.aws mount finds the Bedrock creds
+# (systemd leaves HOME empty for root services -> would mount /.aws -> 401).
+Environment=HOME=__SVC_HOME__
 TimeoutStartSec=180
 # Wait up to 60s for Tailscale to assign an IP (so the tailnet port-bind doesn't
 # fail when dockerd races ahead of tailscaled on a cold boot), then bring the
@@ -58,12 +68,12 @@ ExecStop=/usr/bin/docker compose down
 WantedBy=multi-user.target
 UNIT_EOF
 
-sed -i "s#__REPO_DIR__#${REPO_DIR}#" "$UNIT"
+sed -i -e "s#__REPO_DIR__#${REPO_DIR}#" -e "s#__SVC_HOME__#${SVC_HOME}#" "$UNIT"
 
 systemctl daemon-reload
 systemctl enable zdr-coder.service
-systemctl start zdr-coder.service
-echo "✓ zdr-coder.service installed + enabled (starts on boot), and started now."
+systemctl restart zdr-coder.service
+echo "✓ zdr-coder.service installed + enabled (starts on boot), and (re)started now."
 echo "  WorkingDirectory: ${REPO_DIR}"
 echo
 systemctl --no-pager --full status zdr-coder.service 2>&1 | head -10
