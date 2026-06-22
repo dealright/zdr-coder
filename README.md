@@ -269,7 +269,8 @@ Skip the `pip install skypilot` step — the Groq path is Level 3 API mode, no G
 │   ├── openhands-up.sh             # browser agent UI
 │   ├── hermes-up.sh                # Nous Hermes TUI agent w/ manual approval
 │   ├── aider.sh
-│   └── smoketest.sh
+│   ├── smoketest.sh
+│   └── install-service.sh          # Linux: auto-start the proxy on boot (systemd)
 ├── .env.example
 └── .gitignore
 ```
